@@ -1,0 +1,2 @@
+[console_scripts]
+obsidian-librarian = obsidian_librarian.main:list_directory
