@@ -7,6 +7,7 @@ CONFIG_DIR = os.path.expanduser("~/.config/obsidian-librarian")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
 def display_animation():
+    # TODO: Include the obsidian logo
     width = shutil.get_terminal_size((80, 20)).columns
     spectacles = [
         "",

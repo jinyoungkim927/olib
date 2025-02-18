@@ -7,8 +7,8 @@ setup(
     install_requires=['click'],
     entry_points={
         'console_scripts': [
-            'obsidian-librarian=obsidian_librarian.list_directory:list_directory',
-            'lib-setup=obsidian_librarian.setup_command:run_setup',
+            'olib=obsidian_librarian.list_directory:list_directory',
+            'olib-setup=obsidian_librarian.setup_command:run_setup',
         ],
     },
 )
