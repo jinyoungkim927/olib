@@ -1,2 +1,3 @@
 [console_scripts]
-obsidian-librarian = obsidian_librarian.main:list_directory
+olib-setup = obsidian_librarian.setup_command:run_setup
+olib = obsidian_librarian.list_directory:list_directory

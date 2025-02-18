@@ -2,20 +2,13 @@ from setuptools import setup, find_packages
 
 setup(
     name="obsidian-librarian",
-    version="0.1.0",
+    version="0.1.1",
     packages=find_packages(),
-    install_requires=[
-        'click',
-    ],
+    install_requires=['click'],
     entry_points={
         'console_scripts': [
-            # This is where you can add more commands/functions in your project
-            # ex) 'obsidian-searchn=obsidian_librarian.main:search_files',
-            'obsidian-librarian=obsidian_librarian.main:list_directory',
+            'olib=obsidian_librarian.list_directory:list_directory',
+            'olib-setup=obsidian_librarian.setup_command:run_setup',
         ],
     },
-    author="Your Name",
-    description="A simple directory listing tool",
-    long_description=open("README.md").read(),
-    long_description_content_type="text/markdown",
 )
