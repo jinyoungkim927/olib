@@ -1,16 +1,12 @@
 # Obsidian Librarian
 
-A CLI tool that enhances your note-taking workflow by formatting, analyzing, and connecting your notes.
+![Obsidian Librarian](readme_assets/librarians.webp){width=50%}
 
-![Obsidian Librarian](readme_assets/librarians.webp)
+Obsidian Librarian is a package that gives you more time for real thinking by:
 
-## Features
-
-- 📝 Automatic note formatting and structuring
-- 🔍 Gap analysis in knowledge and prerequisites
-- 🔗 Intelligent connection discovery between ideas
-- 📸 Screenshot-to-text conversion
-- 🔒 Private content detection
+1. Formatting your notes correctly
+2. Pointing out gaps in understanding
+3. Shortlisting interesting connections between ideas
 
 ## Installation
 
@@ -59,9 +55,13 @@ history             Show command history
 undo                Revert last command
 ```
 
+# TODO: add edit_global which is a general command like "find notes related to X and change the content Y"
+
+# TODO: add --revise flag or something to create a clone of the MD file with the changes, not directly editing the original file
+
 ## Philosophy
 
-Read more about the philosophy behind Obsidian Librarian on our [blog](https://google.com).
+Read more about the philosophy behind Obsidian Librarian [here](https://google.com).
 
 - **Effective Learning**: Notes should enhance learning through:
   - Building atomic knowledge

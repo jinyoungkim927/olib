@@ -1,3 +1,10 @@
 [console_scripts]
-olib-setup = obsidian_librarian.setup_command:run_setup
-olib = obsidian_librarian.list_directory:list_directory
+olib = obsidian_librarian.cli:main
+olib-analytics = obsidian_librarian.commands.analytics:show_analytics
+olib-check = obsidian_librarian.commands.check:check_notes
+olib-config = obsidian_librarian.commands.config:manage_config
+olib-format = obsidian_librarian.commands.format:format_notes
+olib-history = obsidian_librarian.commands.history:show_history
+olib-notes = obsidian_librarian.commands.notes:manage_notes
+olib-search = obsidian_librarian.commands.search:search_notes
+olib-undo = obsidian_librarian.commands.undo:undo_command

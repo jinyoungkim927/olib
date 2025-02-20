@@ -2,6 +2,7 @@ README.md
 setup.cfg
 setup.py
 obsidian_librarian/__init__.py
+obsidian_librarian/cli.py
 obsidian_librarian/config.py
 obsidian_librarian/dev_setup.py
 obsidian_librarian/list_directory.py
@@ -13,3 +14,12 @@ obsidian_librarian.egg-info/dependency_links.txt
 obsidian_librarian.egg-info/entry_points.txt
 obsidian_librarian.egg-info/requires.txt
 obsidian_librarian.egg-info/top_level.txt
+obsidian_librarian/commands/__init__.py
+obsidian_librarian/commands/analytics.py
+obsidian_librarian/commands/check.py
+obsidian_librarian/commands/config.py
+obsidian_librarian/commands/format.py
+obsidian_librarian/commands/history.py
+obsidian_librarian/commands/notes.py
+obsidian_librarian/commands/search.py
+obsidian_librarian/commands/undo.py
