@@ -2,6 +2,7 @@ import click
 import os
 from pathlib import Path
 import base64
+import json
 import requests
 from ..config import get_config
 
@@ -51,36 +52,10 @@ def process_image_with_gpt4v(image_path, note_name):
 
     return response.json()['choices'][0]['message']['content']
 
-def get_matching_notes(vault_path, prefix):
-    """Get all notes that start with the given prefix"""
-    if not vault_path or not os.path.exists(vault_path):
-        return []
-    
-    all_files = os.listdir(vault_path)
-    matching_notes = [f[:-3] for f in all_files 
-                     if f.endswith('.md') and 
-                     f.startswith(prefix)]
-    return matching_notes
-
-@click.group()
-def notes():
-    """Note manipulation commands"""
-    pass
-
-@notes.command()
-def format():
-    """Format individual notes"""
-    click.echo("Formatting notes...")
-
-@notes.command()
-def fill():
-    """Complete partial notes"""
-    click.echo("Filling notes...")
-
-@notes.command()
-@click.argument('note_name', type=click.STRING, autocompletion=get_matching_notes)
-def ocr(note_name):
-    """Convert screenshots to text"""
+@click.command()
+@click.argument('note_name')
+def ocr_note(note_name):
+    """Convert images in notes to text using OCR"""
     config = get_config()
     vault_path = config.get('vault_path')
     
