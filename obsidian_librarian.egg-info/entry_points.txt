@@ -1,10 +1,10 @@
 [console_scripts]
 olib = obsidian_librarian.cli:main
-olib-analytics = obsidian_librarian.commands.analytics:show_analytics
-olib-check = obsidian_librarian.commands.check:check_notes
+olib-analytics = obsidian_librarian.commands.analytics:analytics
+olib-check = obsidian_librarian.commands.check:check
 olib-config = obsidian_librarian.commands.config:manage_config
 olib-format = obsidian_librarian.commands.format:format_notes
-olib-history = obsidian_librarian.commands.history:show_history
-olib-notes = obsidian_librarian.commands.notes:manage_notes
-olib-search = obsidian_librarian.commands.search:search_notes
-olib-undo = obsidian_librarian.commands.undo:undo_command
+olib-history = obsidian_librarian.commands.history:history
+olib-notes = obsidian_librarian.commands.notes:notes
+olib-search = obsidian_librarian.commands.search:search
+olib-undo = obsidian_librarian.commands.undo:undo

@@ -21,5 +21,6 @@ obsidian_librarian/commands/config.py
 obsidian_librarian/commands/format.py
 obsidian_librarian/commands/history.py
 obsidian_librarian/commands/notes.py
+obsidian_librarian/commands/ocr.py
 obsidian_librarian/commands/search.py
 obsidian_librarian/commands/undo.py

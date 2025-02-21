@@ -1,8 +1,9 @@
 import click
 
-@click.command()
+@click.group()
 def analytics():
-    click.echo("Analytics...")
+    """Analytics commands for analyzing note patterns"""
+    pass
 
 @analytics.command()
 def show():

@@ -3,7 +3,10 @@ import os
 from pathlib import Path
 import base64
 import requests
+import re
 from ..config import get_config
+from openai import OpenAI
+from ..utils.post_process_formatting import post_process_ocr_output
 
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
@@ -16,14 +19,11 @@ def process_image_with_gpt4v(image_path, note_name):
 
     base64_image = encode_image(image_path)
     
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-
-    payload = {
-        "model": "gpt-4-vision-preview",
-        "messages": [
+    client = OpenAI()
+    
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
             {
                 "role": "user",
                 "content": [
@@ -34,22 +34,18 @@ def process_image_with_gpt4v(image_path, note_name):
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}"
+                            "url": f"data:image/jpeg;base64,{base64_image}",
+                            "detail": "high"
                         }
                     }
                 ]
             }
         ],
-        "max_tokens": 4096
-    }
-
-    response = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers=headers,
-        json=payload
+        max_tokens=8192,
+        temperature=0.5
     )
 
-    return response.json()['choices'][0]['message']['content']
+    return response.choices[0].message.content
 
 def get_matching_notes(vault_path, prefix):
     """Get all notes that start with the given prefix"""
@@ -93,25 +89,39 @@ def ocr(note_name):
         click.echo(f"Error: Note {note_name} not found")
         return
 
-    # Find all images in the note's directory
-    note_dir = note_path.parent
-    image_extensions = ('.png', '.jpg', '.jpeg', '.webp')
-    images = [f for f in note_dir.glob(f"{note_name}.*") if f.suffix.lower() in image_extensions]
-
-    if not images:
-        click.echo("No images found for this note")
+    # Read the note content and find image references
+    with open(note_path, 'r') as f:
+        content = f.read()
+    
+    # Find all image references in the ![[image]] format
+    image_refs = re.findall(r'!\[\[(.*?)\]\]', content)
+    
+    if not image_refs:
+        click.echo("No image references found in this note")
         return
 
-    for image_path in images:
+    modified_content = content
+    for image_ref in image_refs:
+        image_path = Path(vault_path) / image_ref
+        if not image_path.exists():
+            click.echo(f"Warning: Image not found: {image_ref}")
+            continue
+            
         click.echo(f"Processing image: {image_path}")
         try:
-            content = process_image_with_gpt4v(str(image_path), note_name)
+            ocr_content = post_process_ocr_output(process_image_with_gpt4v(str(image_path), note_name))
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # Create new markdown file with OCR results
-            output_path = note_dir / f"{note_name}_ocr.md"
-            with open(output_path, 'w') as f:
-                f.write(content)
+            # Find the image reference in the content and add OCR result right after it
+            image_pattern = f"![[{image_ref}]]"
+            ocr_block = f"\n---\nOCR processing: {timestamp}\n\n{ocr_content}\n"
+            modified_content = modified_content.replace(image_pattern, f"{image_pattern}{ocr_block}")
             
-            click.echo(f"OCR results saved to: {output_path}")
         except Exception as e:
             click.echo(f"Error processing image: {e}")
+    
+    # Write the modified content back to the file
+    with open(note_path, 'w', encoding='utf-8') as f:
+        f.write(modified_content)
+    click.echo(f"OCR results added to: {note_path}")
