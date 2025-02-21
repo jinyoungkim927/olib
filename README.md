@@ -74,3 +74,43 @@ Read more about the philosophy behind Obsidian Librarian [here](https://google.c
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+## Shell Completion Setup
+
+### Automatic Setup (Recommended)
+
+This package uses Click for CLI functionality. To enable autocompletion automatically:
+
+```bash
+pip install "obsidian-librarian[completion]"
+```
+
+### Manual Setup
+
+If the automatic setup doesn't work, you can manually enable completions:
+
+For Zsh, add to your `~/.zshrc`:
+
+```zsh
+eval "$(_OLIB_COMPLETE=zsh_source olib)"
+```
+
+For Bash, add to your `~/.bashrc`:
+
+```bash
+eval "$(_OLIB_COMPLETE=bash_source olib)"
+```
+
+For Fish, add to your `~/.config/fish/completions/olib.fish`:
+
+```fish
+eval (env _OLIB_COMPLETE=fish_source olib)
+```
+
+After adding these lines, restart your shell or run:
+
+```bash
+source ~/.zshrc  # for Zsh
+# or
+source ~/.bashrc  # for Bash
+```

@@ -3,8 +3,28 @@ from setuptools import setup, find_packages
 setup(
     name="obsidian-librarian",
     version="0.1.1",
+    author="Jinyoung Kim",
+    author_email="jinyoungkimwork@gmail.com",
+    description="A CLI tool for managing Obsidian vaults",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    url="https://github.com/jinyoungkim927/obsidian_librarian",
     packages=find_packages(),
-    install_requires=['click', 'requests'],
+    install_requires=[
+        "click",
+        "requests",
+        "openai",
+        "shellingham",
+    ],
+    extras_require={
+        "completion": ["shellingham"],
+    },
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",  # or whatever license you choose
+        "Operating System :: OS Independent",
+    ],
+    python_requires=">=3.6",
     entry_points={
         'console_scripts': [
             'olib=obsidian_librarian.cli:main',
