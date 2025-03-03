@@ -1,0 +1,19 @@
+I want you to extract the content from this for a practitioner's use case 
+who is an expert in data science and a quantitative researcher in finance.
+
+I want you to specifically:
+- Give me several key takeaways
+- Explain intuitively what they mean
+- Provide examples where knowledge of these concepts would change decisions 
+  during the modeling and research process generally
+
+Still include:
+- Clear definitions 
+- Atomic building blocks of concepts
+
+Write in my obsidian note format with:
+- Single latex dollar sign for inline math
+- Double latex dollar sign for display math
+
+The content is:
+{content}

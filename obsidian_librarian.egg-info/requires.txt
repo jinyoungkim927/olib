@@ -1,2 +1,7 @@
 click
 requests
+openai
+shellingham
+
+[completion]
+shellingham

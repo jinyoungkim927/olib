@@ -22,7 +22,8 @@ def process_image_with_gpt4v(image_path, note_name):
     client = OpenAI()
     
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4.5-preview", # This model is not available in the API
+        # model="gpt-4o",
         messages=[
             {
                 "role": "user",
