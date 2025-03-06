@@ -62,6 +62,8 @@ notes               Note manipulation commands
   format            Format individual notes
   fill              Complete partial notes
   ocr               Convert screenshots to text
+  autolink          Automatically add links to notes
+  check-garbage     Find and clean up problematic files
 
 # System
 analytics           Display note-taking analytics dashboard

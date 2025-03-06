@@ -21,69 +21,32 @@ def process_image_with_gpt4v(image_path, note_name):
 
     base64_image = encode_image(image_path)
     
-    # Load the OCR prompt from the prompt file
-    prompt_path = Path(__file__).parent.parent / "prompts" / "ocr_prompt.txt"
-    try:
-        with open(prompt_path, 'r') as f:
-            prompt_template = f.read()
-        # Format the prompt with the note name
-        ocr_prompt = prompt_template.format(note_name=note_name)
-    except Exception as e:
-        # Fallback to basic prompt if file can't be read
-        ocr_prompt = f"Please write detailed notes about {note_name}. Transcribe the content from the image faithfully, and then organize that information in an appropriate way. Format the response in markdown."
-    
     client = OpenAI()
     
-    # Use the most capable available model
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",  # Current best model for vision tasks
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": ocr_prompt
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                                "detail": "high"
-                            }
+    response = client.chat.completions.create(
+        model="gpt-4.5-preview", # This model is not available in the API
+        # model="gpt-4o",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Please write detailed notes about {note_name}. Transcribe the content from the image faithfully, and then organize that information in an appropriate way. Format the response in markdown."
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}",
+                            "detail": "high"
                         }
-                    ]
-                }
-            ],
-            max_tokens=8192,
-            temperature=0.5
-        )
-    except Exception as e:
-        # If gpt-4o fails, try to fall back to vision-preview
-        response = client.chat.completions.create(
-            model="gpt-4-vision-preview",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": ocr_prompt
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                                "detail": "high"
-                            }
-                        }
-                    ]
-                }
-            ],
-            max_tokens=8192,
-            temperature=0.5
-        )
+                    }
+                ]
+            }
+        ],
+        max_tokens=8192,
+        temperature=0.5
+    )
 
     return response.choices[0].message.content
 
@@ -192,7 +155,7 @@ def is_within_latex(content, match_start, match_end):
     return False
 
 
-from .fixed_latex_linking import process_note, process_vault, get_note_titles as get_all_titles
+from .latex_aware_linking import process_note, process_vault, get_note_titles as get_all_titles
 
 @click.group()
 def notes():
@@ -275,8 +238,7 @@ def autolink(note_name=None, verbose=False, dry_run=False):
 
 @notes.command()
 @click.argument('note_name', type=click.STRING)
-@click.option('--fix-math', '-m', is_flag=True, default=True, help='Fix math formatting issues in OCR output')
-def ocr(note_name, fix_math=True):
+def ocr(note_name):
     """Convert screenshots to text"""
     config = get_config()
     vault_path = config.get('vault_path')
@@ -310,15 +272,7 @@ def ocr(note_name, fix_math=True):
             
         click.echo(f"Processing image: {image_path}")
         try:
-            # Get OCR result and apply post-processing
             ocr_content = post_process_ocr_output(process_image_with_gpt4v(str(image_path), note_name))
-            
-            # Apply additional math formatting fixes if requested
-            if fix_math:
-                # Import here to avoid circular imports
-                from ..commands.format import fix_math_formatting
-                ocr_content = fix_math_formatting(ocr_content)
-                
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             

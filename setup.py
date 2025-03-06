@@ -15,6 +15,7 @@ setup(
         "requests",
         "openai",
         "shellingham",
+        "pyperclip",
     ],
     extras_require={
         "completion": ["shellingham"],

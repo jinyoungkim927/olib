@@ -19,8 +19,11 @@ obsidian_librarian/commands/__init__.py
 obsidian_librarian/commands/analytics.py
 obsidian_librarian/commands/check.py
 obsidian_librarian/commands/config.py
+obsidian_librarian/commands/fixed_latex_linking.py
+obsidian_librarian/commands/fixed_notes.py
 obsidian_librarian/commands/format.py
 obsidian_librarian/commands/history.py
+obsidian_librarian/commands/latex_aware_linking.py
 obsidian_librarian/commands/notes.py
 obsidian_librarian/commands/ocr.py
 obsidian_librarian/commands/search.py

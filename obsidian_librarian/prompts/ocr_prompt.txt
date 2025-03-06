@@ -1,1 +1,10 @@
 Please write detailed notes about {note_name}. Transcribe the content from the image faithfully, and then organize that information in an appropriate way. Format the response in markdown.
+
+Some important formatting guidelines:
+1. For mathematical expressions, use Markdown's single dollar signs ($) for inline math and double dollar signs ($$) for display math.
+2. Ensure math delimiters are properly paired and balanced.
+3. Don't leave spaces between dollar delimiters and the math content (write $x^2$ not $ x^2 $).
+4. For LaTeX environments like align, matrix, etc., convert them to standard Markdown math blocks with double dollar signs.
+5. Use LaTeX notation for all mathematical symbols and expressions.
+6. If the image contains diagrams or figures, describe them clearly.
+7. Preserve the hierarchical structure of the content with appropriate headings and lists.
