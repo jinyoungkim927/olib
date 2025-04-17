@@ -57,10 +57,6 @@ history             Show command history
 undo                Revert last command
 ```
 
-# TODO: add edit_global which is a general command like "find notes related to X and change the content Y"
-
-# TODO: add --revise flag or something to create a clone of the MD file with the changes, not directly editing the original file
-
 ## Philosophy
 
 Read more about the philosophy behind Obsidian Librarian [here](https://google.com).
