@@ -1,6 +1,6 @@
 # Obsidian Librarian
 
-![Obsidian Librarian](readme_assets/librarians.webp){width=50%}
+<img src="readme_assets/librarians.webp" alt="Obsidian Librarian" width="50%">
 
 Obsidian Librarian is a package that gives you more time for real thinking by:
 
