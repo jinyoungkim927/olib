@@ -5,8 +5,9 @@ import glob
 import json
 from datetime import datetime
 from pathlib import Path
+import re
 
-from ..format import fix_math_formatting
+# from ..format import fix_math_formatting
 from ...config import get_config
 
 class FormatFixer:
@@ -35,10 +36,10 @@ class FormatFixer:
                 content = f.read()
             
             # Apply formatter
-            modified_content = fix_math_formatting(content)
+            modified_content = self.apply_all_fixes(content)
             
             # Check if changes were made
-            is_changed = content \!= modified_content
+            is_changed = content != modified_content
             
             if not is_changed:
                 if self.verbose:
@@ -60,7 +61,7 @@ class FormatFixer:
                     # Show some sample changes
                     for i, (old, new) in enumerate(zip(content.split('\n'), 
                                                        modified_content.split('\n'))):
-                        if old \!= new:
+                        if old != new:
                             print(f"  - {old}")
                             print(f"  + {new}")
                             if i > 3:  # Show just a few examples
@@ -148,6 +149,100 @@ class FormatFixer:
                 print(f"Saved history to {self.history_file}")
         except Exception as e:
             print(f"Warning: Could not save history file: {e}")
+
+    def apply_all_fixes(self, text: str) -> str:
+        """
+        Applies a sequence of formatting fixes to the input text.
+
+        Args:
+            text: The raw text content of a note.
+
+        Returns:
+            The text content after applying all registered fixes.
+        """
+        original_text = text
+
+        # --- Apply fixes in a specific order ---
+
+        # 1. Fix escaped LaTeX delimiters ( \$...\$ -> $...$ )
+        text = self._fix_escaped_latex_delimiters(text)
+
+        # 2. Fix content within math blocks (e.g., \_ -> _)
+        text = self._fix_math_content(text)
+
+        # 3. Add other fixes here if needed
+        # ... etc ...
+
+        # --- End of fixes ---
+
+        if self.verbose and text != original_text:
+             print("  Applied formatting fixes.") # General message
+
+        return text
+
+    def _fix_escaped_latex_delimiters(self, text: str) -> str:
+        """
+        Corrects improperly escaped LaTeX delimiters like \$...\$ to $...$.
+
+        Finds instances of a literal '\$' followed by some content and another
+        literal '\$', and replaces them with '$' followed by the content and '$'.
+        It avoids changing valid LaTeX commands starting with '\'.
+
+        Args:
+            text: The input string potentially containing incorrect LaTeX.
+
+        Returns:
+            The string with corrected LaTeX delimiters.
+        """
+        # Pattern: Finds \$ followed by non-$ characters (non-greedy) followed by \$
+        # Replacement: Replaces with $ followed by the captured content followed by $
+        corrected_text = re.sub(r'\\\$([^$]+?)\\\$', r'$\1$', text)
+        return corrected_text
+
+    def _fix_math_content(self, text: str) -> str:
+        """
+        Cleans up common issues within $...$ and $$...$$ blocks.
+        Currently fixes escaped underscores: \_ -> _
+        """
+        def replace_content(match):
+            # Group 1 captures the delimiter ($ or $$)
+            # Group 2 captures the content inside
+            delimiter = match.group(1)
+            content = match.group(2)
+
+            # Apply fixes to the content
+            # Replace escaped underscore with literal underscore
+            fixed_content = content.replace(r'\_', '_')
+
+            # Add more content fixes here if needed in the future
+            # fixed_content = fixed_content.replace(r'\*', '*') # Example
+
+            # Reconstruct the math block
+            return delimiter + fixed_content + delimiter
+
+        # Pattern to find math blocks ($...$ or $$...$$)
+        # (\${1,2}): Captures $ or $$ as group 1
+        # (.*?): Non-greedily captures content as group 2
+        # \1: Matches the same delimiter captured in group 1
+        # re.DOTALL allows '.' to match newlines, important for $$...$$ blocks
+        pattern = r'(\${1,2})(.*?)\1'
+        corrected_text = re.sub(pattern, replace_content, text, flags=re.DOTALL)
+
+        # Optional: Add verbose logging specific to this fix
+        # if self.verbose and corrected_text != text:
+        #     print("    - Applied math content fixes (e.g., escaped underscores).")
+
+        return corrected_text
+
+    # --- Add other fix methods below if migrating from fix_math_formatting ---
+    # def _fix_inline_math_spaces(self, text: str) -> str:
+    #     # ... implementation ...
+    #     return text
+    #
+    # def _convert_latex_delimiters(self, text: str) -> str:
+    #     # ... implementation ...
+    #     return text
+    # ... etc ...
 
 def format_command(path=None, dry_run=False, backup=True, verbose=False):
     """Command line entry point for the format fixer"""

@@ -28,3 +28,6 @@ obsidian_librarian/commands/notes.py
 obsidian_librarian/commands/ocr.py
 obsidian_librarian/commands/search.py
 obsidian_librarian/commands/undo.py
+obsidian_librarian/commands/utilities/__init__.py
+obsidian_librarian/commands/utilities/format_fixer.py
+obsidian_librarian/commands/utilities/history_manager.py
