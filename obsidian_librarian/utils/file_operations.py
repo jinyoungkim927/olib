@@ -3,10 +3,13 @@ from pathlib import Path
 import glob
 import re
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict
+from collections import Counter
 
 # Configure logging if needed for this module
 # logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger(__name__)
 
 def get_markdown_files(directory_path: str) -> list[str]:
     """
@@ -65,63 +68,206 @@ def sanitize_filename(name: str) -> str:
 
     return name
 
-def find_note_in_vault(vault_path: str, note_identifier: str) -> Optional[str]:
+def read_note_content(file_path: Path) -> Optional[str]:
     """
-    Searches recursively within the vault for a note matching the identifier.
+    Reads the content of a note file.
+
+    Args:
+        file_path: The absolute Path object of the note file.
+
+    Returns:
+        The content of the file as a string, or None if an error occurs
+        (e.g., file not found, permission error, decoding error).
+    """
+    try:
+        # Ensure we are working with an absolute path
+        if not file_path.is_absolute():
+             logging.warning(f"Received relative path in read_note_content: {file_path}. Attempting to read anyway.")
+             # Depending on context, you might want to resolve it or raise an error
+
+        if not file_path.is_file():
+            logging.error(f"File not found or is not a regular file: {file_path}")
+            return None
+
+        # Try reading with UTF-8 first, fallback to latin-1 if needed
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return content
+        except UnicodeDecodeError:
+            logging.warning(f"UTF-8 decoding failed for {file_path}. Trying latin-1.")
+            try:
+                with open(file_path, 'r', encoding='latin-1') as f:
+                    content = f.read()
+                return content
+            except Exception as e:
+                logging.error(f"Failed to read file {file_path} even with latin-1: {e}")
+                return None
+        except Exception as e: # Catch other potential errors like PermissionError
+            logging.error(f"Error reading file {file_path}: {e}")
+            return None
+
+    except Exception as e: # Catch errors related to path handling itself
+        logging.error(f"Unexpected error handling path {file_path} in read_note_content: {e}")
+        return None
+
+def find_note_in_vault(vault_path: str, note_identifier: str) -> Optional[Path]:
+    """
+    Finds a unique markdown note (.md) within the vault based on its name or relative path.
 
     Args:
         vault_path: The absolute path to the Obsidian vault.
-        note_identifier: The filename (e.g., "My Note.md") or base name (e.g., "My Note")
-                         or a relative path within the vault (e.g., "Folder/My Note.md").
+        note_identifier: The name of the note (e.g., "My Note") or its relative
+                         path within the vault (e.g., "Folder/My Note.md").
+                         The .md extension is optional.
 
     Returns:
-        The absolute path to the found note, or None if not found or ambiguous.
-        Prints a warning if multiple matches are found and returns the first one.
+        An absolute Path object to the unique note file if found, otherwise None.
+        Returns None if multiple ambiguous matches are found or if no .md file matches.
     """
-    if not vault_path or not os.path.isdir(vault_path):
-        logging.error(f"Invalid vault path provided for searching: {vault_path}")
+    vault_path_obj = Path(vault_path)
+    if not vault_path_obj.is_dir():
+        logging.error(f"Vault path does not exist or is not a directory: {vault_path}")
         return None
 
-    p_vault = Path(vault_path)
-    potential_matches = []
-
-    # Case 1: Identifier might be a direct relative path
-    potential_path = p_vault / note_identifier
-    if potential_path.is_file() and potential_path.suffix.lower() == '.md':
-        potential_matches.append(str(potential_path.resolve()))
-
-    # Case 2: Identifier is likely a filename or base name, search recursively
-    if not potential_matches:
-        search_term = note_identifier
-        if not search_term.lower().endswith('.md'):
-            search_term += ".md"
-
-        # Use rglob for recursive search
-        # Note: This might be slow in very large vaults. Consider index-based search later if needed.
-        found_files = list(p_vault.rglob(f"**/{search_term}")) # Search for exact match first
-
-        if not found_files and note_identifier.lower().endswith('.md'):
-             # If user provided .md and exact match failed, try without it? Less common.
-             pass
-        elif not found_files:
-             # If user didn't provide .md and exact match failed, maybe try partial?
-             # For now, let's stick to exact match (with added .md if needed)
-             pass
-
-
-        potential_matches.extend([str(f.resolve()) for f in found_files])
-
-
-    if len(potential_matches) == 0:
-        logging.info(f"No note found matching identifier '{note_identifier}' in vault '{vault_path}'.")
-        return None
-    elif len(potential_matches) == 1:
-        logging.info(f"Found unique note match: {potential_matches[0]}")
-        return potential_matches[0]
+    # Normalize the identifier: remove .md extension if present for base name matching
+    # Keep the original identifier for direct path checking
+    original_identifier = note_identifier
+    if note_identifier.lower().endswith(".md"):
+        base_name = note_identifier[:-3]
     else:
-        # Ambiguous match
-        logging.warning(f"Multiple notes found matching identifier '{note_identifier}':")
-        for match in potential_matches:
-            logging.warning(f"  - {match}")
-        logging.warning("Using the first match found. Please provide a more specific path if this is incorrect.")
-        return potential_matches[0] # Return the first match found
+        base_name = note_identifier
+
+    potential_matches: List[Path] = []
+
+    # 1. Check direct relative paths (both with and without .md)
+    # Ensure they are files and end with .md (case-insensitive)
+    potential_direct_path_no_ext = vault_path_obj / original_identifier
+    potential_direct_path_with_ext = vault_path_obj / f"{original_identifier}.md" # Handles case where identifier has no ext
+
+    if potential_direct_path_no_ext.is_file() and potential_direct_path_no_ext.suffix.lower() == ".md":
+         potential_matches.append(potential_direct_path_no_ext.resolve())
+
+    # Check the path with .md added, only if it's different from the first check
+    # and avoid adding duplicates if original_identifier already ended with .md
+    if potential_direct_path_with_ext != potential_direct_path_no_ext and \
+       potential_direct_path_with_ext.is_file() and \
+       potential_direct_path_with_ext.suffix.lower() == ".md":
+        potential_matches.append(potential_direct_path_with_ext.resolve())
+
+
+    # 2. Perform recursive search by base name (case-insensitive stem)
+    # This helps find notes even if the direct path wasn't exact (e.g., case difference)
+    # or if only the base name was provided.
+    try:
+        for item in vault_path_obj.rglob(f"{base_name}.md"): # More efficient glob
+             if item.is_file() and item.stem.lower() == base_name.lower(): # Double check stem match case-insensitively
+                 potential_matches.append(item.resolve())
+        # Add a second glob for case variations if the first didn't catch everything
+        # (less efficient but covers more edge cases like file systems preserving case in glob)
+        for item in vault_path_obj.rglob(f"*"):
+             if item.is_file() and item.suffix.lower() == ".md" and item.stem.lower() == base_name.lower():
+                 potential_matches.append(item.resolve()) # Resolve ensures absolute path
+
+    except Exception as e:
+         logging.error(f"Error during recursive search in vault: {e}")
+         # Decide if we should return None or continue with only direct matches
+
+
+    # 3. Deduplicate and check results
+    # Use set for efficient deduplication based on the resolved Path objects
+    unique_matches = list(set(potential_matches))
+
+    if len(unique_matches) == 0:
+        logging.info(f"No markdown note found matching identifier '{original_identifier}' in vault '{vault_path}'.")
+        return None
+    elif len(unique_matches) == 1:
+        found_path = unique_matches[0]
+        logging.info(f"Found unique markdown note match: {found_path}")
+        return found_path
+    else: # len > 1
+        # --- Refined Ambiguity Check ---
+        # Check if all paths point to the same actual file using inode comparison
+        try:
+            first_inode = os.stat(unique_matches[0]).st_ino
+            all_same_inode = True
+            for match in unique_matches[1:]:
+                # Check if file exists before stating to avoid errors on dangling paths
+                if not match.exists() or os.stat(match).st_ino != first_inode:
+                    all_same_inode = False
+                    break
+
+            if all_same_inode:
+                # If all point to the same file, it's not truly ambiguous.
+                # Return the first one found (or potentially try to find one with preferred casing).
+                found_path = unique_matches[0]
+                logging.info(f"Found unique markdown note match (resolving case ambiguity): {found_path}")
+                return found_path
+            else:
+                # Genuinely ambiguous match (different files)
+                logging.warning(f"Multiple different markdown notes found matching identifier '{original_identifier}':")
+                relative_matches = sorted([match.relative_to(vault_path_obj) for match in unique_matches if match.exists()]) # Show existing matches
+                for rel_match in relative_matches:
+                    logging.warning(f"  - {rel_match}")
+                logging.error("Ambiguous match. Please provide a more specific path.")
+                return None
+        except OSError as e:
+            logging.error(f"Error checking file status during ambiguity resolution: {e}")
+            # Fallback to reporting ambiguity if stat fails
+            logging.warning(f"Multiple markdown notes found matching identifier '{original_identifier}' (could not resolve ambiguity):")
+            relative_matches = sorted([match.relative_to(vault_path_obj) for match in unique_matches if match.exists()])
+            for rel_match in relative_matches:
+                 logging.warning(f"  - {rel_match}")
+            logging.error("Ambiguous match. Please provide a more specific path.")
+            return None
+        # --- End Refined Ambiguity Check ---
+
+# --- Add function to find popular tags ---
+def get_popular_tags(vault_path: str, min_count: int = 5) -> List[str]:
+    """
+    Scans markdown files in the vault to find tags used more than min_count times.
+
+    Args:
+        vault_path: The absolute path to the Obsidian vault.
+        min_count: The minimum number of times a tag must appear to be included.
+
+    Returns:
+        A list of popular tag names (without the '#').
+    """
+    logger.info(f"Scanning vault for popular tags (min count: {min_count})...")
+    vault_path_obj = Path(vault_path)
+    if not vault_path_obj.is_dir():
+        logger.error(f"Vault path does not exist or is not a directory: {vault_path}")
+        return []
+
+    tag_counter = Counter()
+    # Regex to find tags: # followed by alphanumeric or _ / -
+    # Avoids matching tags within code blocks or URLs potentially
+    tag_regex = re.compile(r'(?<![/#])#([a-zA-Z0-9_\-\/]+)')
+
+    try:
+        md_files = vault_path_obj.rglob('*.md')
+        total_files = 0
+        for file_path in md_files:
+            total_files += 1
+            try:
+                # Basic check to skip potential code blocks - not perfect
+                content = read_note_content(file_path)
+                if content:
+                     # Find all tags in the content
+                     # A more robust solution might parse frontmatter separately
+                     found_tags = tag_regex.findall(content)
+                     # Normalize tags (lowercase, remove leading/trailing slashes if any)
+                     normalized_tags = [tag.lower().strip('/') for tag in found_tags]
+                     tag_counter.update(normalized_tags)
+            except Exception as e:
+                logger.warning(f"Could not read or parse tags from {file_path.name}: {e}")
+
+        popular_tags = [tag for tag, count in tag_counter.items() if count >= min_count]
+        logger.info(f"Scan complete. Found {len(popular_tags)} popular tags from {total_files} files.")
+        return sorted(popular_tags)
+
+    except Exception as e:
+        logger.error(f"Error scanning vault for tags: {e}", exc_info=True)
+        return []
+# --- End function ---

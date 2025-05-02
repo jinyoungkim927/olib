@@ -36,5 +36,6 @@ obsidian_librarian/commands/utilities/history_manager.py
 obsidian_librarian/utils/__init__.py
 obsidian_librarian/utils/ai.py
 obsidian_librarian/utils/file_operations.py
+obsidian_librarian/utils/formatting.py
 obsidian_librarian/utils/indexing.py
 obsidian_librarian/utils/post_process_formatting.py
