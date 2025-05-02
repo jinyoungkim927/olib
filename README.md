@@ -1,8 +1,8 @@
-# olib ## _(Obsidian Librarian)_
+# olib 
 
 <img src="readme_assets/librarians.webp" alt="Obsidian Librarian" width="50%">
 
-Obsidian Librarian is a package that gives you more time for real thinking by:
+olib (Obsidian Librarian) is a package that gives you more time for real thinking by:
 
 1. Formatting your notes correctly
 2. Pointing out gaps in understanding
