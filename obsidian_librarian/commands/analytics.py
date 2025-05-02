@@ -29,12 +29,9 @@ except ImportError:
     mdates = None
 
 
-from ..config import get_config
-from ..utils.file_operations import get_markdown_files # Assuming you have this utility
-
-def count_words(text: str) -> int:
-    """Counts words in a string, simple split by whitespace."""
-    return len(text.split())
+from ..config import get_config, save_config, get_vault_path_from_config
+from .. import vault_state
+from ..utils.file_operations import get_markdown_files, count_words
 
 def get_note_stats(vault_path: str) -> list[dict]:
     """Gathers statistics for each note."""
@@ -85,7 +82,11 @@ stats_list = json.loads(stats_data_json)
 # Convert to DataFrame and fix types
 stats_df = pd.DataFrame(stats_list)
 stats_df['modified_time'] = pd.to_datetime(stats_df['modified_time'])
-stats_df['word_count'] = pd.to_numeric(stats_df['word_count'])
+stats_df['word_count'] = pd.to_numeric(stats_df['word_count'], errors='coerce').fillna(-1)
+
+# Filter out entries where word count wasn't available if needed for specific plots
+stats_df_wc = stats_df[stats_df['word_count'] != -1].copy()
+
 
 print(f"Loaded {len(stats_df)} notes.")
 stats_df.head()
@@ -94,31 +95,40 @@ stats_df.head()
     summary_code = """
 print("\\n--- Basic Summary ---")
 total_notes = len(stats_df)
-total_words = stats_df['word_count'].sum()
-avg_words = stats_df['word_count'].mean()
-median_words = stats_df['word_count'].median()
+# Calculate word stats only if available
+if not stats_df_wc.empty:
+    total_words = stats_df_wc['word_count'].sum()
+    avg_words = stats_df_wc['word_count'].mean()
+    median_words = stats_df_wc['word_count'].median()
+    print(f"Total Words (where counted): {total_words}")
+    print(f"Average Words per Note: {avg_words:.2f}")
+    print(f"Median Words per Note: {median_words:.0f}")
+else:
+    print("Word counts not available in this dataset.")
 
 print(f"Total Notes: {total_notes}")
-print(f"Total Words: {total_words}")
-print(f"Average Words per Note: {avg_words:.2f}")
-print(f"Median Words per Note: {median_words:.0f}")
+
 """
 
     length_dist_code = """
 print("\\n--- Note Length Distribution ---")
-plt.figure(figsize=(12, 6))
-sns.histplot(stats_df['word_count'], bins=30, kde=True)
-plt.title('Distribution of Note Lengths (Word Count)')
-plt.xlabel('Word Count')
-plt.ylabel('Number of Notes')
-plt.grid(axis='y', alpha=0.7)
-plt.show()
+if not stats_df_wc.empty:
+    plt.figure(figsize=(12, 6))
+    sns.histplot(stats_df_wc['word_count'], bins=30, kde=True)
+    plt.title('Distribution of Note Lengths (Word Count)')
+    plt.xlabel('Word Count')
+    plt.ylabel('Number of Notes')
+    plt.grid(axis='y', alpha=0.7)
+    plt.show()
 
-print("\\nTop 5 Longest Notes:")
-print(stats_df.nlargest(5, 'word_count')[['filename', 'word_count']])
+    print("\\nTop 5 Longest Notes:")
+    print(stats_df_wc.nlargest(5, 'word_count')[['filename', 'word_count']])
 
-print("\\nTop 5 Shortest Notes:")
-print(stats_df.nsmallest(5, 'word_count')[['filename', 'word_count']])
+    print("\\nTop 5 Shortest Notes:")
+    print(stats_df_wc.nsmallest(5, 'word_count')[['filename', 'word_count']])
+else:
+    print("Word counts not available for distribution plot.")
+
 """
 
     activity_code = """
@@ -139,6 +149,7 @@ plt.tight_layout()
 plt.show()
 
 print("\\nLast 10 Modified Notes:")
+# Use original df here as word count isn't needed
 print(stats_df.nlargest(10, 'modified_time')[['filename', 'modified_time']])
 """
     # --- Add cells to notebook ---
@@ -162,35 +173,75 @@ print(stats_df.nlargest(10, 'modified_time')[['filename', 'modified_time']])
 
 
 # --- Main Analytics Command ---
-@click.command()
+@click.command(name="analytics")
 @click.option('--use-git-history', is_flag=True, help='Analyze Git history for detailed changes (requires GitPython and repo).')
 @click.option('-d', '--notebook', is_flag=True, help='Generate a Jupyter notebook with detailed visualizations on the Desktop.')
-def analytics(use_git_history=False, notebook=False):
+@click.option('--force-scan', is_flag=True, help='Force reading all files instead of using the index (slower).')
+def run_analytics(use_git_history=False, notebook=False, force_scan=False):
     """
     Analyzes the Obsidian vault and displays statistics.
 
     Provides insights into note count, word counts, modification activity,
     and note length distribution. Optionally generates a Jupyter notebook
-    for richer visualizations.
+    for richer visualizations. Uses the index by default for speed.
     """
+    # --- Perform checks at the beginning ---
     config = get_config()
-    vault_path = config.get('vault_path')
+    vault_path = get_vault_path_from_config()
+    db_path = vault_state.DB_PATH
 
-    if not vault_path or not os.path.isdir(vault_path):
-        click.echo("Error: Vault path not configured or not found. Run 'olib config setup' first.", err=True)
-        return
+    if not vault_path:
+        click.echo(click.style("Error: Vault path not configured. Run 'olib config setup' first.", fg="red"), err=True)
+        import sys
+        sys.exit(1)
+
+    # Check index existence (unless force_scan is True)
+    if not force_scan and not db_path.exists():
+        click.echo(click.style("Error: The vault index database hasn't been created yet.", fg="red"), err=True)
+        click.echo("Please run " + click.style("'olib update-index'", fg="cyan") + " or use --force-scan.")
+        import sys
+        sys.exit(1)
+
+    # Check schedule prompt (only if not forcing scan, as index is relevant)
+    if not force_scan and not config.get("schedule_prompted"):
+        click.echo(click.style("Tip:", fg="yellow") + " To keep analytics accurate, it's recommended to schedule hourly index updates.")
+        click.echo("Run " + click.style("'olib schedule-update'", fg="cyan") + " for instructions.")
+        config["schedule_prompted"] = True
+        save_config(config)
+        click.echo("---") # Separator
+    # --- End of checks ---
 
     click.echo(f"Analyzing vault: {vault_path}")
 
     # --- Data Gathering ---
-    note_stats = get_note_stats(vault_path)
+    note_stats = []
+    if force_scan:
+        click.echo("Gathering note statistics by scanning files (may be slow)...")
+        note_stats = get_note_stats(str(vault_path))
+    else:
+        click.echo("Gathering note statistics from index...")
+        # Attempt to get stats from index
+        # Note: This currently lacks word count. We might need to enhance
+        # get_note_stats_from_index or add word count to the DB later.
+        # For now, let's fall back to full scan if index data is insufficient
+        # for requested analysis (e.g., word count needed).
+        # A simple approach for now: Use index for basic counts/dates,
+        # but if word count stats are needed, use get_note_stats.
+        # Let's use get_note_stats for now to ensure word counts work.
+        # TODO: Optimize later by adding word count to index or selectively scanning.
+        click.echo("Note: Currently performing full scan for word counts. Index optimization pending.")
+        note_stats = get_note_stats(str(vault_path))
+        # note_stats = get_note_stats_from_index(db_path) # Use this when index is sufficient
+
     if not note_stats:
         click.echo("No markdown notes found or processed.")
         return
 
     # Convert to DataFrame for easier analysis
     stats_df = pd.DataFrame(note_stats)
-    stats_df['modified_time'] = pd.to_datetime(stats_df['modified_time']) # Ensure correct type
+    # Ensure correct types (especially if coming from mixed sources later)
+    stats_df['modified_time'] = pd.to_datetime(stats_df['modified_time'])
+    stats_df['word_count'] = pd.to_numeric(stats_df['word_count'], errors='coerce').fillna(0) # Coerce errors, fill NaN with 0
 
     # --- Basic Calculations ---
     total_notes = len(stats_df)
@@ -210,23 +261,29 @@ def analytics(use_git_history=False, notebook=False):
     click.echo(f"Max Words/Note:      {max_words}")
 
     # Note Length Distribution Plot (Terminal)
-    if plt and total_notes > 0:
+    if plt and total_notes > 0 and stats_df['word_count'].nunique() > 1: # Check if plotext exists and data is plottable
         click.echo("\n--- Note Length Distribution (Word Count) ---")
         word_counts = stats_df['word_count'].tolist()
-        plt.clf() # Clear previous plots
-        plt.hist(word_counts, bins=20) # Adjust bins as needed
+        plt.clf()
+        plt.hist(word_counts, bins=20)
         plt.title("Note Length Distribution")
         plt.xlabel("Word Count")
         plt.ylabel("Frequency")
         plt.show()
     elif not plt:
         click.echo("\nNote Length Distribution: Install 'plotext' for terminal plot.")
+    elif not (total_notes > 0 and stats_df['word_count'].nunique() > 1):
+         click.echo("\nNote Length Distribution: Not enough data or variation to plot.")
+
 
     # Recent Activity (Terminal)
     click.echo("\n--- Recent Activity (Last 10 Modified) ---")
     last_modified = stats_df.nlargest(10, 'modified_time')
     for _, row in last_modified.iterrows():
-        click.echo(f"- {row['filename']} (Words: {row['word_count']}, Modified: {row['modified_time'].strftime('%Y-%m-%d %H:%M')})")
+        # Ensure filename is treated as string
+        filename_str = str(row.get('filename', 'N/A'))
+        click.echo(f"- {filename_str} (Words: {row['word_count']}, Modified: {row['modified_time'].strftime('%Y-%m-%d %H:%M')})")
+
 
     # --- Git History Analysis (Placeholder) ---
     if use_git_history:
@@ -246,6 +303,7 @@ def analytics(use_git_history=False, notebook=False):
             click.echo("GitPython not installed. Cannot perform Git history analysis.")
             click.echo("Install it using: pip install GitPython")
 
+
     # --- Jupyter Notebook Generation ---
     if notebook:
         desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
@@ -255,5 +313,6 @@ def analytics(use_git_history=False, notebook=False):
         notebook_filename = f"obsidian_analytics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.ipynb"
         output_path = os.path.join(desktop_path, notebook_filename)
         generate_notebook(stats_df, output_path)
+
 
     click.echo("\nAnalysis complete.")

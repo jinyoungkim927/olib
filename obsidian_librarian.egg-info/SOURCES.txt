@@ -9,6 +9,7 @@ obsidian_librarian/list_directory.py
 obsidian_librarian/load_package.py
 obsidian_librarian/setup_command.py
 obsidian_librarian/shell_setup.py
+obsidian_librarian/vault_state.py
 obsidian_librarian.egg-info/PKG-INFO
 obsidian_librarian.egg-info/SOURCES.txt
 obsidian_librarian.egg-info/dependency_links.txt

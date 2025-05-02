@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import glob
 
 def get_markdown_files(directory_path: str) -> list[str]:
@@ -19,5 +20,12 @@ def get_markdown_files(directory_path: str) -> list[str]:
     md_files = glob.glob(pattern, recursive=True)
 
     return md_files
+
+# Add the count_words function here
+def count_words(text: str) -> int:
+    """Counts words in a string, simple split by whitespace."""
+    if not text:
+        return 0
+    return len(text.split())
 
 # You can add other file-related utility functions here 
