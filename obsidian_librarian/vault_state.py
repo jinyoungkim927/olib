@@ -56,106 +56,114 @@ def _calculate_hash(filepath: Path) -> str:
         print(f"Error hashing file {filepath}: {e}")
         return ""
 
-def update_vault_scan(vault_path: Optional[Path] = None, db_path: Path = DB_PATH):
-    """Scans the vault, updates the database with new/modified files.
-       Reads vault_path from config if not provided.
-    """
-    if vault_path is None:
-        vault_path = get_vault_path_from_config()
-        if not vault_path:
-            # Raise an error or return early if vault path isn't configured
-            raise ValueError("Vault path is not configured. Run 'olib config setup' first.")
+def update_vault_scan(vault_path: Path, db_path: Path = DB_PATH, quiet: bool = False) -> bool:
+    """Scans the vault, updates the database. Returns True on success."""
+    conn = None # Initialize conn
+    try:
+        conn = get_db_connection(db_path)
+        cursor = conn.cursor()
+        current_time = time.time()
+        found_files = set()
+        changes_made = False # Track if DB was modified
 
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    current_time = time.time()
-    found_files = set()
+        if not quiet:
+            print(f"Scanning vault: {vault_path}...")
 
-    print(f"Scanning vault: {vault_path}...")
-    for root, _, files in os.walk(vault_path):
-        for filename in files:
-            if filename.lower().endswith(".md"):
-                filepath = Path(root) / filename
-                # Ensure relative_path_str calculation is robust
-                try:
-                    relative_path_str = str(filepath.relative_to(vault_path))
-                except ValueError:
-                    print(f"Warning: File {filepath} seems outside the vault path {vault_path}. Skipping.")
-                    continue # Skip files outside the vault root
+        # Check if vault path exists right before scan
+        if not vault_path.is_dir():
+             if not quiet:
+                  print(f"Error: Vault path '{vault_path}' not found during scan.")
+             return False # Indicate failure
 
-                found_files.add(relative_path_str)
+        for root, _, files in os.walk(vault_path):
+            for filename in files:
+                if filename.lower().endswith(".md"):
+                    filepath = Path(root) / filename
+                    # Ensure relative path calculation is robust
+                    try:
+                        relative_path_str = str(filepath.relative_to(vault_path))
+                    except ValueError:
+                         if not quiet:
+                              print(f"Warning: File {filepath} seems outside vault base {vault_path}. Skipping.")
+                         continue # Skip files not relative to vault_path
 
-                try:
-                    mtime = os.path.getmtime(filepath)
-                except FileNotFoundError:
-                    continue # File might have been deleted during scan
+                    found_files.add(relative_path_str)
 
-                cursor.execute("SELECT last_modified, content_hash FROM vault_files WHERE filepath = ?", (relative_path_str,))
-                row = cursor.fetchone()
+                    try:
+                        mtime = os.path.getmtime(filepath)
+                    except FileNotFoundError:
+                        continue # File might have been deleted during scan
 
-                needs_update = False
-                current_hash = "" # Initialize current_hash
+                    cursor.execute("SELECT last_modified, content_hash FROM vault_files WHERE filepath = ?", (relative_path_str,))
+                    row = cursor.fetchone()
 
-                if row:
-                    # File exists in DB, check if modified
-                    if mtime > row['last_modified']:
-                        # Check hash only if mtime changed, optimization
-                        current_hash = _calculate_hash(filepath)
-                        if current_hash and current_hash != row['content_hash']:
-                            needs_update = True
-                            print(f"Updating modified file: {relative_path_str}")
-                        elif not current_hash: # Handle hash calculation error
-                             print(f"Warning: Could not calculate hash for modified file {relative_path_str}. Skipping update.")
-                        else: # Hash is the same, just update timestamps
-                             cursor.execute("UPDATE vault_files SET last_modified = ?, last_scanned = ? WHERE filepath = ?",
-                                           (mtime, current_time, relative_path_str))
-                             current_hash = row['content_hash'] # Keep old hash
-                    else:
-                        # Even if mtime is same, update last_scanned time
+                    needs_db_update = False
+                    current_hash = "" # Initialize hash
+
+                    if row:
+                        # File exists in DB, check if modified
+                        if mtime > row['last_modified']:
+                            current_hash = _calculate_hash(filepath)
+                            if current_hash and current_hash != row['content_hash']:
+                                needs_db_update = True
+                                if not quiet:
+                                    print(f"Updating modified file: {relative_path_str}")
+                        # Always update last_scanned time, even if no content change
                         cursor.execute("UPDATE vault_files SET last_scanned = ? WHERE filepath = ?",
                                        (current_time, relative_path_str))
-                        # No hash calculation needed if mtime hasn't changed
-                        current_hash = row['content_hash'] # Use existing hash
-                else:
-                    # New file
-                    current_hash = _calculate_hash(filepath)
-                    if current_hash:
-                        needs_update = True
-                        print(f"Adding new file: {relative_path_str}")
-                    else: # Handle hash calculation error
-                        print(f"Warning: Could not calculate hash for new file {relative_path_str}. Skipping add.")
+                        if not current_hash: # Use existing hash if not recalculated
+                             current_hash = row['content_hash']
+                    else:
+                        # New file
+                        current_hash = _calculate_hash(filepath)
+                        if current_hash: # Only add if hash calculation succeeded
+                            needs_db_update = True
+                            if not quiet:
+                                print(f"Adding new file: {relative_path_str}")
 
+                    if needs_db_update and current_hash:
+                        changes_made = True
+                        access_timestamps = json.dumps([]) # Start with empty access list on create/update
+                        if row: # Update existing record
+                            cursor.execute("""
+                                UPDATE vault_files
+                                SET last_modified = ?, last_scanned = ?, content_hash = ?
+                                WHERE filepath = ?
+                            """, (mtime, current_time, current_hash, relative_path_str))
+                        else: # Insert new record
+                            cursor.execute("""
+                                INSERT INTO vault_files (filepath, filename, first_seen, last_modified, last_scanned, content_hash, access_timestamps)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (relative_path_str, filename, current_time, mtime, current_time, current_hash, access_timestamps))
 
-                if needs_update and current_hash:
-                    # access_timestamps should be handled separately by record_access
-                    # Only set initial timestamps when inserting a new record
-                    if row: # Update existing record (only modified, scanned, hash)
-                        cursor.execute("""
-                            UPDATE vault_files
-                            SET last_modified = ?, last_scanned = ?, content_hash = ?
-                            WHERE filepath = ?
-                        """, (mtime, current_time, current_hash, relative_path_str))
-                    else: # Insert new record
-                        # Initialize access_timestamps for new files
-                        initial_access = json.dumps([]) # Start with empty list
-                        cursor.execute("""
-                            INSERT INTO vault_files (filepath, filename, first_seen, last_modified, last_scanned, content_hash, access_timestamps)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, (relative_path_str, filename, current_time, mtime, current_time, current_hash, initial_access))
+        # Remove files from DB that are no longer in the vault
+        cursor.execute("SELECT filepath FROM vault_files")
+        db_files = {row['filepath'] for row in cursor.fetchall()}
+        deleted_files = db_files - found_files
+        if deleted_files:
+            changes_made = True
+            if not quiet:
+                print(f"Removing {len(deleted_files)} deleted files from index...")
+            cursor.executemany("DELETE FROM vault_files WHERE filepath = ?", [(f,) for f in deleted_files])
 
-    # Remove files from DB that are no longer in the vault
-    cursor.execute("SELECT filepath FROM vault_files")
-    db_files = {row['filepath'] for row in cursor.fetchall()}
-    deleted_files = db_files - found_files
-    if deleted_files:
-        print(f"Removing {len(deleted_files)} deleted files from index...")
-        cursor.executemany("DELETE FROM vault_files WHERE filepath = ?", [(f,) for f in deleted_files])
+        conn.commit()
+        if not quiet and changes_made:
+             print("Index updated.")
+        elif not quiet:
+             print("Index is up-to-date.")
+        return True # Indicate success
 
-
-    conn.commit()
-    conn.close()
-    print("Vault scan complete.")
-
+    except sqlite3.Error as e:
+         if not quiet:
+              print(f"Database error during scan: {e}")
+         return False # Indicate failure
+    except Exception as e:
+         if not quiet:
+              print(f"An unexpected error occurred during scan: {e}")
+         return False # Indicate failure
+    finally:
+        if conn:
+            conn.close()
 
 def record_access(relative_filepath: str, db_path: Path = DB_PATH):
     """Records an access timestamp for a given file."""
