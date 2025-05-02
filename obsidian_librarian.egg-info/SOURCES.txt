@@ -31,3 +31,6 @@ obsidian_librarian/commands/undo.py
 obsidian_librarian/commands/utilities/__init__.py
 obsidian_librarian/commands/utilities/format_fixer.py
 obsidian_librarian/commands/utilities/history_manager.py
+obsidian_librarian/utils/__init__.py
+obsidian_librarian/utils/file_operations.py
+obsidian_librarian/utils/post_process_formatting.py

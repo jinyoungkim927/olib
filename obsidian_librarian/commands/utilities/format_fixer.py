@@ -170,7 +170,10 @@ class FormatFixer:
         # 2. Fix content within math blocks (e.g., \_ -> _)
         text = self._fix_math_content(text)
 
-        # 3. Add other fixes here if needed
+        # 3. Fix bullet point indentation (spaces -> tabs)
+        text = self._fix_bullet_indentation(text)
+
+        # 4. Add other fixes here if needed
         # ... etc ...
 
         # --- End of fixes ---
@@ -231,6 +234,22 @@ class FormatFixer:
         # Optional: Add verbose logging specific to this fix
         # if self.verbose and corrected_text != text:
         #     print("    - Applied math content fixes (e.g., escaped underscores).")
+
+        return corrected_text
+
+    def _fix_bullet_indentation(self, text: str) -> str:
+        """
+        Converts space-indented second-level bullets to tab-indented.
+        Specifically targets lines starting with '  * '.
+        """
+        # Pattern: Start of line (^), exactly two spaces (  ), literal '* '
+        # Replacement: Start of line, a tab (\t), literal '* '
+        # re.MULTILINE makes ^ match the start of each line, not just the string
+        corrected_text = re.sub(r'^(  )\* ', r'\t* ', text, flags=re.MULTILINE)
+
+        # Optional: Add verbose logging specific to this fix
+        # if self.verbose and corrected_text != text:
+        #     print("    - Applied bullet indentation fix (spaces to tabs).")
 
         return corrected_text
 

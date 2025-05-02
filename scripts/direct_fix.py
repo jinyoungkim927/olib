@@ -144,7 +144,7 @@ def undo_latest():
         print(f"This will restore {len(modified_files)} files to their previous state.")
         
         confirm = input("Continue? (y/n): ").lower()
-        if confirm \!= 'y':
+        if confirm != 'y':
             print("Operation cancelled.")
             return
         

@@ -1,8 +1,15 @@
-click
+click>=8.0
 requests
 openai
 shellingham
 pyperclip
+pandas>=1.0
+matplotlib>=3.0
+nbformat>=5.0
+plotext>=5.0
+GitPython>=3.0
+seaborn>=0.11
 
-[completion]
-shellingham
+[dev]
+pytest
+flake8
