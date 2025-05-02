@@ -9,6 +9,8 @@ from openai import OpenAI
 from ..utils.post_process_formatting import post_process_ocr_output
 import pyperclip
 import time
+from ..utils.ai import generate_note_content
+from ..utils.file_operations import sanitize_filename
 
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
@@ -736,3 +738,55 @@ def check_garbage(min_size=10, max_size=50000, empty_only=False, duplicate_title
     # Ask to fix broken links
     if problems.get('broken_links') and click.confirm("\nDo you want to fix broken links?"):
         handle_broken_links(problems['broken_links'], vault_path)
+
+@notes.command()
+@click.option('--topic', '-t', required=True, help='The topic or concept for the note.')
+@click.option('--output-dir', '-o', default=None, type=click.Path(file_okay=False, dir_okay=True, writable=True),
+              help='Directory within the vault to save the note (default: vault root).')
+@click.option('--llm-model', default=None, help='Specify the LLM model to use (e.g., gpt-4o-mini). Uses default if not set.')
+def generate(topic, output_dir, llm_model):
+    """Generates a draft note for a given topic using an LLM."""
+
+    vault_path_str = get_config().get('vault_path')
+    if not vault_path_str:
+        click.secho("Error: Vault path not configured. Run 'olib config setup' first.", fg="red")
+        return
+
+    vault_path = Path(vault_path_str)
+
+    # Determine save directory
+    save_dir = vault_path
+    if output_dir:
+        # Ensure output_dir is relative to vault_path or handle absolute paths appropriately
+        # For simplicity, let's assume output_dir is relative for now
+        save_dir = vault_path / output_dir
+        try:
+            save_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            click.secho(f"Error creating output directory '{save_dir}': {e}", fg="red")
+            return
+
+    # Generate filename from topic
+    # Use a utility to remove invalid characters for filenames
+    safe_filename = sanitize_filename(topic) + ".md"
+    output_filepath = save_dir / safe_filename
+
+    click.echo(f"Generating note for topic: '{topic}'...")
+    if llm_model:
+        click.echo(f"Using LLM model: {llm_model}")
+
+    # Call the AI function
+    generated_content = generate_note_content(topic, model_name=llm_model) if llm_model else generate_note_content(topic)
+
+    if not generated_content:
+        click.secho("Failed to generate note content from LLM.", fg="red")
+        return
+
+    # Save the content
+    try:
+        with open(output_filepath, 'w', encoding='utf-8') as f:
+            f.write(generated_content)
+        click.secho(f"Successfully generated and saved note to:", fg="green")
+        click.echo(str(output_filepath))
+    except IOError as e:
+        click.secho(f"Error saving generated note to '{output_filepath}': {e}", fg="red")

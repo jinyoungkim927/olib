@@ -3,6 +3,9 @@ requests
 openai
 shellingham
 pyperclip
+sentence-transformers
+torch
+scikit-learn
 pandas>=1.0
 matplotlib>=3.0
 nbformat>=5.0

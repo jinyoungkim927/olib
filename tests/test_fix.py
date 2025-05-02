@@ -1,5 +1,7 @@
-#\!/usr/bin/env python3
-from obsidian_librarian.commands.format import fix_math_formatting
+#!/usr/bin/env python3
+import pytest
+# Import from the utility module
+from obsidian_librarian.commands.utilities.format_fixer import FormatFixer
 
 test_content = '''# Test Format File
 #tag #with-[[brackets]]
@@ -9,7 +11,9 @@ This is a test file with [[[triple brackets]]] and [[nested [[wiki]] links]].
 Also check [[[[quadruple brackets]]]] and __SIMPLE_LINK_42__ placeholders.
 '''
 
-fixed_content = fix_math_formatting(test_content)
+# Instantiate the class and call the method
+fixer_instance = FormatFixer()
+fixed_content = fixer_instance.apply_all_fixes(test_content)
 
 print("Original content:")
 print("-" * 50)
@@ -25,4 +29,4 @@ print("-" * 50)
 if fixed_content == test_content:
     print("\nNo changes were made")
 else:
-    print("\nChanges were made successfully\!")
+    print("\nChanges were made successfully!")

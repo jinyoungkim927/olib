@@ -10,6 +10,9 @@ install_requires = [
     'openai',           # Add back
     'shellingham',      # Add back (also used for completion extra before)
     'pyperclip',        # Add back
+    'sentence-transformers', # For embeddings
+    'torch',               # Dependency for sentence-transformers
+    'scikit-learn',      # For cosine similarity calculation
 
     # Analytics Dependencies (previously in 'analytics' extra)
     'pandas>=1.0',

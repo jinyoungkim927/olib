@@ -1,13 +1,14 @@
-#\!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Test script to verify the format fixer
 """
 import os
 import sys
-from obsidian_librarian.commands.format import fix_math_formatting
+# Import from the utility module
+from obsidian_librarian.commands.utilities.format_fixer import FormatFixer
 
 # Test content with formatting issues
-test_content = """# Test Format File
+test_content = r"""# Test Format File \h
 #tag #with-[[brackets]]
 
 This is a test file with [[[triple brackets]]] and [[nested [[wiki]] links]].
@@ -18,7 +19,8 @@ Math expression: $\hat{\beta} = \arg\min_{\[[Beta]]} (y - X\beta)^2 + \lambda \|
 """
 
 # Run formatting directly
-fixed_content = fix_math_formatting(test_content)
+fixer_instance = FormatFixer()
+fixed_content = fixer_instance.apply_all_fixes(test_content)
 
 # Compare results
 print("Original content:")
@@ -32,7 +34,7 @@ print(fixed_content)
 print("-" * 50)
 
 # Check if any changes were made
-is_different = fixed_content \!= test_content
+is_different = fixed_content != test_content
 print(f"\nChanges made: {'Yes' if is_different else 'No'}")
 
 # Check specific fixes

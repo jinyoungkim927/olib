@@ -47,12 +47,12 @@ with open(test_file, 'r', encoding='utf-8') as f:
     current_content = f.read()
 
 print("\nResults:")
-if current_content \!= test_content:
-    print("✓ Test file was modified\!")
+if current_content != test_content:
+    print("✓ Test file was modified!")
     print("Original:", test_content[:50] + "...")
     print("Modified:", current_content[:50] + "...")
 else:
-    print("✗ Test file was NOT modified\!")
+    print("✗ Test file was NOT modified!")
 
 # Clean up test file
 os.remove(test_file)

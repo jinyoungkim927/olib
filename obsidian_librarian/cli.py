@@ -4,6 +4,7 @@ import sys # Import sys
 import platform # Import platform
 import shutil # Import shutil
 import time # Import time
+import logging
 from .commands import (
     format,
     check,
@@ -11,7 +12,8 @@ from .commands import (
     notes,
     history,
     undo,
-    config as config_cmd
+    config as config_cmd,
+    index as index_cmd # Add the new index command module
 )
 # Import config utility functions if needed elsewhere, but not the command itself
 # from .config import get_config # Example if needed
@@ -22,106 +24,160 @@ from .commands.analytics import run_analytics
 # Import the config command from its actual location
 from .commands.config import manage_config as config_command
 from pathlib import Path
-from typing import Optional # Keep Optional for type hinting
+from typing import Optional, Tuple # Keep Optional for type hinting
 
 # Import vault state and config functions
 from . import vault_state
-from .config import get_vault_path_from_config, get_config, get_auto_update_settings, update_last_scan_timestamp, set_auto_update_setting
+from .config import get_vault_path_from_config, get_config, get_auto_update_settings, update_last_scan_timestamp, set_auto_update_setting, get_config_dir, get_last_embeddings_build_timestamp, update_last_embeddings_build_timestamp
+from .vault_state import get_max_mtime_from_db # <-- Import
+from .utils.indexing import DEFAULT_MODEL as DEFAULT_EMBEDDING_MODEL # <-- Import default model name
+# --- Import the build function from commands.index ---
+from .commands.index import _perform_index_build
+# --- End import ---
 
-# Commands that should NOT trigger an auto-update check
-COMMANDS_TO_SKIP_AUTOUPDATE = ['config', 'update-index']
+# Commands that should NOT trigger *any* auto-updates (history or embeddings)
+COMMANDS_TO_SKIP_UPDATES = ['config', 'index', 'init'] # Add 'index' group
+
+# --- Configure Root Logger Early ---
+# Set the root logger level to WARNING to suppress INFO messages from libraries like NumExpr
+# You can adjust the level (e.g., ERROR) or format as needed.
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
+# Optional: Set NumExpr threads to potentially silence its specific info message
+# os.environ['NUMEXPR_MAX_THREADS'] = '8' # Or another number based on your cores
 
 @click.group()
-@click.pass_context # Pass context to the group
-def main(ctx):
-    """Obsidian Librarian - A tool for enhanced note-taking and knowledge management
+@click.version_option()
+def main():
+    """Obsidian Librarian: CLI tool for managing your Obsidian vault."""
+    # Check if config needs setup before running any command (except init/config)
+    ctx = click.get_current_context()
+    if ctx.invoked_subcommand not in ['init', 'config']:
+        config_dir = get_config_dir()
+        if not os.path.exists(os.path.join(config_dir, "config.json")):
+             click.echo("Configuration not found.")
+             # Optionally run setup automatically or prompt user
+             # For now, just inform and exit or let subsequent commands fail
+             # if not setup_initial_config(): # Example auto-setup
+             #     return # Exit if setup fails/is cancelled
 
-    Format notes, analyze content, and discover connections in your Obsidian vault.
-    """
-    # Store context for potential use in subcommands if needed later
-    ctx.ensure_object(dict)
+    # --- Auto-update checks moved here, before command execution ---
+    if ctx.invoked_subcommand not in COMMANDS_TO_SKIP_UPDATES:
+        # 1. Check and update file history DB (vault_state)
+        db_updated, db_path = _check_and_run_auto_update() # Modified to return db_path
 
-    # --- Auto-update Check ---
-    # Get command name user invoked (ctx.invoked_subcommand)
-    # Check happens *before* the subcommand runs
-    command_name = ctx.invoked_subcommand
-    if command_name and command_name not in COMMANDS_TO_SKIP_AUTOUPDATE:
-        settings = get_auto_update_settings()
-        if settings["enabled"]:
-            now = time.time()
-            time_since_last_scan = now - settings["last_scan_timestamp"]
-            interval = settings["interval_seconds"]
+        # 2. Check and update embeddings index if necessary
+        if db_path: # Only proceed if vault path and db path are valid
+            # --- Pass db_path correctly ---
+            _check_and_run_embedding_update(db_path)
+            # --- End passing db_path ---
+    # --- End auto-update checks ---
 
-            if time_since_last_scan > interval:
-                click.echo(f"Index last checked > {interval // 60} minutes ago. Checking for updates...")
-                vault_path = get_vault_path_from_config()
-                db_path = vault_state.DB_PATH
 
-                if vault_path and db_path.parent.exists(): # Basic check if config/db dir exists
-                    # Ensure DB schema is initialized before scan
-                    vault_state.initialize_database(db_path)
-                    # Run scan quietly
-                    success = vault_state.update_vault_scan(vault_path, db_path, quiet=True)
-                    if success:
-                        update_last_scan_timestamp(now) # Update timestamp only on success
-                        click.echo("Auto-update check complete.")
-                    else:
-                        click.echo(click.style("Auto-update check failed. Run 'olib update-index' manually.", fg="red"))
-                elif not vault_path:
-                     click.echo(click.style("Skipping auto-update: Vault path not configured.", fg="yellow"))
-                # Add separator if output occurred
-                click.echo("---")
-
-# Add all commands to the main group
-main.add_command(format.format_notes, "format")
-main.add_command(check.check, "check")
-main.add_command(search.search, "search")
-main.add_command(notes.notes, "notes")
-main.add_command(run_analytics, "analytics")
-main.add_command(config_cmd.manage_config, name='config')
-main.add_command(history.history, "history")
-main.add_command(undo.undo, "undo")
-# main.add_command(link_command, name='link') # <-- Comment out this line
-
-# --- Configuration ---
-# Remove this section as it's no longer used by the click command
-# # A simple way to find the vault path - assumes it's set in an env var
-# # or we could pass it as an option to every command.
-# # A more robust solution would use a config file.
-# DEFAULT_VAULT_PATH_STR = os.environ.get("OBSIDIAN_VAULT_PATH")
-#
-# def get_vault_path(vault_path_str: Optional[str] = DEFAULT_VAULT_PATH_STR) -> Path:
-#     """Gets the vault path, ensuring it exists."""
-#     if not vault_path_str:
-#         raise typer.Exit("Error: OBSIDIAN_VAULT_PATH environment variable not set, or vault path not provided.") # typer.Exit is removed
-#     vault_path = Path(vault_path_str).resolve()
-#     if not vault_path.is_dir():
-#         raise typer.Exit(f"Error: Vault path '{vault_path}' not found or is not a directory.") # typer.Exit is removed
-#     return vault_path
-
-# --- New Indexing Command (using click) ---
-@main.command(name="update-index")
-def update_index_command():
-    """
-    Manually scans the vault and updates the internal file index database.
-    """
+# --- Modify this function to return db_path ---
+def _check_and_run_auto_update() -> Tuple[bool, Optional[str]]:
+    """Checks if auto-update is due and runs the vault scan."""
+    settings = get_auto_update_settings()
     vault_path = get_vault_path_from_config()
+    db_path = vault_state.DB_PATH # Use the constant
+
     if not vault_path:
-        click.echo("Error: Vault path not configured. Run 'olib config setup' first.", err=True)
+        # Vault path not set, cannot auto-update
+        # click.echo("Auto-update skipped: Vault path not configured.", err=True) # Optional message
+        return False, None
+
+    if not settings['enabled']:
+        # click.echo("Auto-update disabled.") # Optional message
+        # Still return db_path as it might be needed for embedding check later
+        return False, db_path
+
+    last_scan = settings['last_scan_timestamp']
+    interval = settings['interval_seconds']
+    now = time.time()
+
+    if now - last_scan > interval:
+        click.echo("Auto-update interval elapsed, checking for vault changes...")
+        try:
+            vault_state.initialize_database(db_path)
+            # Run scan quietly
+            success = vault_state.update_vault_scan(vault_path, db_path, quiet=True)
+            if success:
+                update_last_scan_timestamp() # Update timestamp only on success
+                click.echo("Vault scan complete.")
+                return True, db_path
+            else:
+                click.secho("Auto-update vault scan failed.", fg="red")
+                return False, db_path # Return db_path even on failure
+        except Exception as e:
+            click.secho(f"An error occurred during auto-update scan: {e}", fg="red", err=True)
+            return False, db_path # Return db_path even on failure
+    else:
+        # Interval not elapsed
+        return False, db_path # Return db_path
+
+# --- Add this new function ---
+def _check_and_run_embedding_update(db_path: str): # <-- Accept db_path as string
+    """Checks if embeddings index needs rebuilding and triggers it."""
+    config_dir = get_config_dir()
+    vault_path_config = get_vault_path_from_config() # Assume vault_path is valid if db_path is
+
+    # Double check paths needed for build function
+    if not vault_path_config or not config_dir:
+        logging.warning("Skipping embedding update check: Vault or Config path missing.")
         return
 
-    db_path = vault_state.DB_PATH
-    click.echo(f"Using database: {db_path}")
+    # --- Convert paths to Path objects ---
+    vault_path = Path(vault_path_config)
+    db_path_obj = Path(db_path)
+    # --- End path conversion ---
+
 
     try:
-        vault_state.initialize_database(db_path)
-        # Run scan verbosely
-        success = vault_state.update_vault_scan(vault_path, db_path, quiet=False)
-        if success:
-            # Update timestamp after successful manual scan
-            update_last_scan_timestamp()
+        last_build_ts = get_last_embeddings_build_timestamp()
+        # Query the DB for the most recent modification time recorded
+        # --- Pass Path object to DB function ---
+        max_mtime = get_max_mtime_from_db(db_path_obj)
+        # --- End passing Path object ---
+
+        # If max_mtime exists and is more recent than the last build, rebuild.
+        # The check `last_build_ts == 0.0` handles the very first run.
+        if max_mtime is not None and (max_mtime > last_build_ts or last_build_ts == 0.0):
+            click.echo("Vault changes detected since last embeddings build. Rebuilding index...")
+            # Get model from config or use default (handled within _perform_index_build now)
+            # config = get_config()
+            # model_name = config.get('embedding_model', DEFAULT_EMBEDDING_MODEL)
+
+            # Call the refactored build function from commands.index
+            # --- Pass vault_path and db_path_obj ---
+            success = _perform_index_build(vault_path, db_path_obj)
+            # --- End passing paths ---
+            if success:
+                # Update timestamp only on successful rebuild
+                update_last_embeddings_build_timestamp() # <-- Call timestamp update here too
+                click.echo("Embeddings index rebuilt successfully.")
+            else:
+                click.secho("Automatic embeddings index rebuild failed. Run 'olib index build' manually.", fg="red")
+        # else: # Optional: Log that no rebuild is needed
+            # logging.info("Embeddings index is up-to-date.")
+
     except Exception as e:
-        click.echo(f"An unexpected error occurred during index update: {e}", err=True)
+        # Catch broad exceptions to prevent crashing the main command
+        click.secho(f"Error during automatic embedding index check/update: {e}", fg="red", err=True)
+        logging.exception("Embedding update check failed")
+# --- End of new function ---
+
+
+# Add command groups
+main.add_command(format.format_notes, name="format")
+main.add_command(check.check)
+main.add_command(search.search)
+main.add_command(notes.notes)
+main.add_command(history.history)
+main.add_command(undo.undo)
+main.add_command(config_cmd.manage_config, name="config")
+main.add_command(index_cmd.index) # Add the index group
+# main.add_command(link_command) # Removed
+main.add_command(run_analytics, name="analytics")
+# main.add_command(update_index_command) # Remove old standalone update-index if it exists
 
 
 if __name__ == '__main__':

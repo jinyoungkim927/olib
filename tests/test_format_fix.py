@@ -1,6 +1,10 @@
 import re
+import pytest
+import os
+# Import from the utility module
+from obsidian_librarian.commands.utilities.format_fixer import FormatFixer
 
-text = """#data-science #ML  
+text = r"""#data-science #ML \l
 
 [[Ridge Regression]] (L2 [[Regularization]]) is a penalty on the L2 norm of the [[Beta]] coefficients in [[Linear [[Regression]]]]. As with all [[Regularization]], it combats overfitting by shrinking coefficient magnitudes.  
 
@@ -39,14 +43,15 @@ $\hat{\beta}_R = (X^TX + \lambda I)^{-__SIMPLE_LINK_12__}X^Ty$
 where $\lambda$ controls the [[Regularization]] strength.  
 """
 
-from obsidian_librarian.commands.format import fix_math_formatting
-
 print("BEFORE:")
 print("=" * 80)
 print(text)
 print("=" * 80)
 
-fixed = fix_math_formatting(text)
+# --- FIX: Instantiate the class and call the method ---
+fixer_instance = FormatFixer()
+fixed = fixer_instance.apply_all_fixes(text)
+# --- End Fix ---
 
 print("\nAFTER:")
 print("=" * 80)
@@ -65,6 +70,6 @@ print(f"- Simple link placeholders: {simple_link_count}")
 print("\nTotal potential issues: {0}".format(nested_wiki_count + triple_bracket_count + simple_link_count))
 
 if text == fixed:
-    print("\nERROR: No changes were made\! The formatter didn't fix anything.")
+    print("\nERROR: No changes were made! The formatter didn't fix anything.")
 else:
     print("\nSUCCESS: The formatter made changes to the text.")

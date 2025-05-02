@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Optional, Dict
 import time
-from ..setup_command import run_setup
+from ..initial_setup import run_setup
 from ..config import (
     get_config_dir,
     get_config,

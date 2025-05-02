@@ -3,10 +3,20 @@ import json
 from pathlib import Path
 from typing import Optional, Dict
 import time
+import logging
+import sys
 
 CONFIG_DIR = Path(os.path.expanduser("~/.config/obsidian-librarian"))
 CONFIG_FILE = CONFIG_DIR / "config.json"
 DEFAULT_AUTO_UPDATE_INTERVAL_SECONDS = 3600 # 1 hour
+DEFAULT_CONFIG = {
+    "vault_path": None,
+    "auto_update_interval_minutes": 60,
+    "last_scan_timestamp": 0,
+    "embedding_model": "all-MiniLM-L6-v2", # Default model
+    "llm_model": "gpt-4o-mini", # Default LLM
+    "last_embeddings_build_timestamp": 0 # <-- Add new key with default 0
+}
 
 def get_config_dir() -> Path:
     """Returns the application's configuration directory path."""
@@ -38,15 +48,20 @@ def get_vault_path_from_config() -> Optional[Path]:
         return None
     return vault_path.resolve()
 
-def save_config(config: dict):
+def save_config(config_data):
     """Saves the configuration dictionary to the config file."""
-    config_dir = get_config_dir()
-    config_file = config_dir / "config.json"
+    config_path = CONFIG_FILE # Use the globally defined config file path
     try:
-        with open(config_file, 'w') as f:
-            json.dump(config, f, indent=4)
-    except IOError as e:
-        print(f"Error saving configuration to {config_file}: {e}")
+        # Ensure the directory exists
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(config_path, 'w') as f:
+            json.dump(config_data, f, indent=4)
+        # print(f"DEBUG: Config saved to {config_path}") # Optional debug print
+    except Exception as e:
+        # Log or print the error appropriately
+        print(f"Error saving config to {config_path}: {e}", file=sys.stderr)
+        # Consider raising the exception or handling it based on application needs
+        # raise # Re-raise if saving is critical
 
 def setup_vault_path():
     """Prompts the user for the vault path and saves it."""
@@ -102,3 +117,22 @@ def set_auto_update_setting(key: str, value):
     config["last_scan_timestamp"] = 0.0
     save_config(config)
     print(f"Set {key} = {value}")
+
+def get_last_embeddings_build_timestamp() -> float:
+    """Gets the timestamp of the last successful embeddings build."""
+    config = get_config()
+    # Return 0.0 if key doesn't exist or is invalid, ensuring rebuild on first run
+    return float(config.get("last_embeddings_build_timestamp", 0.0))
+
+def update_last_embeddings_build_timestamp():
+    """Updates the timestamp of the last successful embeddings build to the current time."""
+    # config_dir = get_config_dir() # Not needed if save_config uses global path
+    # config_path = os.path.join(config_dir, CONFIG_FILE) # Not needed
+    config_data = get_config() # Load current config
+    current_time = time.time()
+    config_data["last_embeddings_build_timestamp"] = current_time
+    # print(f"DEBUG: Updating timestamp to {current_time}") # Optional debug print
+    # --- FIX: Call save_config with only one argument ---
+    save_config(config_data)
+    # --- End Fix ---
+    # print("DEBUG: Timestamp update saved.") # Optional debug print
