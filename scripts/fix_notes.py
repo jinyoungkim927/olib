@@ -31,7 +31,7 @@ def fix_note(note_path, dry_run=False):
             content_lines = content.split('\n')
             fixed_lines = fixed_content.split('\n')
             for i, (old, new) in enumerate(zip(content_lines, fixed_lines)):
-                if old \!= new:
+                if old != new:
                     print(f"  - Before: {old}")
                     print(f"  + After:  {new}")
                     if i >= 3:  # Show just a few examples
@@ -99,7 +99,7 @@ def main():
         if args.dry_run:
             print("Running in dry-run mode (no changes will be made)")
         
-        if input("Continue? (y/n): ").lower() \!= "y":
+        if input("Continue? (y/n): ").lower() != "y":
             print("Operation cancelled")
             sys.exit(0)
         
