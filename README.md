@@ -1,4 +1,4 @@
-# Obsidian Librarian
+# olib ## _(Obsidian Librarian)_
 
 <img src="readme_assets/librarians.webp" alt="Obsidian Librarian" width="50%">
 
