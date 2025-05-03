@@ -5,6 +5,10 @@ from typing import Optional, Dict
 import time
 import logging
 import sys
+import platform
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path(os.path.expanduser("~/.config/obsidian-librarian"))
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -14,27 +18,81 @@ DEFAULT_CONFIG = {
     "auto_update_interval_minutes": 60,
     "last_scan_timestamp": 0,
     "embedding_model": "all-MiniLM-L6-v2", # Default model
-    "llm_model": "gpt-4o-mini", # Default LLM
+    "llm_model": "gpt-4o", # Default LLM
     "last_embeddings_build_timestamp": 0 # <-- Add new key with default 0
 }
 
 def get_config_dir() -> Path:
-    """Returns the application's configuration directory path."""
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    return CONFIG_DIR
+    """Gets the platform-specific configuration directory path."""
+    if platform.system() == "Windows":
+        config_dir = Path(os.environ.get("APPDATA", "")) / "ObsidianLibrarian"
+    elif platform.system() == "Darwin": # macOS
+        config_dir = Path.home() / ".config" / "obsidian-librarian"
+    else: # Linux and other Unix-like
+        config_dir = Path.home() / ".config" / "obsidian-librarian"
+
+    # Fallback if standard paths fail (e.g., unusual environment)
+    if not config_dir.parent.exists():
+         config_dir = Path.home() / ".obsidian_librarian" # Fallback to home dir
+
+    return config_dir
+
+def ensure_config_dir_exists():
+    """Creates the configuration directory if it doesn't exist."""
+    config_dir = get_config_dir()
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        logger.debug(f"Ensured configuration directory exists: {config_dir}")
+    except OSError as e:
+        logger.error(f"Could not create configuration directory {config_dir}: {e}")
+        # Depending on severity, you might want to raise the error or exit
+        # For now, just log the error. Operations requiring the dir will likely fail later.
+
+def get_config_file_path() -> Path:
+    """Gets the full path to the configuration file."""
+    return get_config_dir() / "config.json"
 
 def get_config() -> Dict:
-    """Loads the configuration file."""
-    config_dir = get_config_dir()
-    config_file = config_dir / "config.json"
-    if config_file.exists():
-        try:
-            with open(config_file, 'r') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            print(f"Warning: Configuration file at {config_file} is corrupted. Please run setup again.")
-            return {}
-    return {}
+    """
+    Loads configuration from file, adds missing default values,
+    and saves the updated configuration back to the file if defaults were added.
+    """
+    config = {}
+    defaults_added = False # Flag to track if we need to save
+
+    try:
+        ensure_config_dir_exists() # Ensure dir exists before trying to read
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+        else:
+            logger.info(f"Config file not found at {CONFIG_FILE}. Creating with defaults.")
+            # If file doesn't exist, all defaults will be added below
+            defaults_added = True # Mark for saving
+
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning(f"Error loading config file {CONFIG_FILE}: {e}. Using defaults and attempting to overwrite.")
+        config = {} # Start fresh if file is corrupt or unreadable
+        defaults_added = True # Mark for saving
+
+    # Check for missing keys compared to DEFAULT_CONFIG and add them
+    current_keys = set(config.keys())
+    default_keys = set(DEFAULT_CONFIG.keys())
+    missing_keys = default_keys - current_keys
+
+    if missing_keys:
+        logger.info(f"Adding default values for missing keys: {', '.join(missing_keys)}")
+        for key in missing_keys:
+            config[key] = DEFAULT_CONFIG[key]
+        defaults_added = True # Mark that defaults were added
+
+    # --- Save the config ONLY if defaults were added ---
+    if defaults_added:
+        logger.info("Saving configuration file with added default values.")
+        save_config(config) # Call the save function
+    # --- End Save ---
+
+    return config
 
 def get_vault_path_from_config() -> Optional[Path]:
     """Gets the vault path from the config file."""

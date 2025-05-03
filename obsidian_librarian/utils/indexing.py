@@ -6,6 +6,7 @@ from tqdm import tqdm  # For progress bar
 from typing import Dict, Tuple, Optional, List, Any # <-- Ensure Any is imported
 from pathlib import Path # Import Path
 import time
+import numpy as np
 
 # Configure logging
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -46,7 +47,6 @@ def index_vault(
         model_name: Name of the Sentence Transformer model to use.
     """
     # --- Import heavy libraries here ---
-    import numpy as np
     from sentence_transformers import SentenceTransformer
     # --- End import ---
 
@@ -127,53 +127,23 @@ def index_vault(
         # Re-raise the exception so the caller knows it failed
         raise
 
-def load_index_data(embeddings_path: str, map_path: str) -> Tuple[Optional[Any], Optional[dict]]: # Changed type hint for numpy
-    """
-    Loads the embeddings NumPy array and the file map dictionary from disk.
-
-    Args:
-        embeddings_path: Path to the embeddings NumPy file.
-        map_path: Path to the file map dictionary.
-
-    Returns:
-        A tuple containing either a NumPy array or None, and either a dictionary or None.
-    """
-    # --- Import numpy here ---
-    import numpy as np
-    # --- End import ---
-
+def load_index_data(embeddings_path: Path, file_map_path: Path) -> tuple[Optional[np.ndarray], Optional[dict]]:
+    """Loads embeddings and file map from specified paths."""
     embeddings = None
     file_map = None
 
-    if os.path.exists(embeddings_path):
+    if embeddings_path.exists():
         try:
-            # np is used here
             embeddings = np.load(embeddings_path)
-            logging.info(f"Loaded embeddings from {embeddings_path} (Shape: {embeddings.shape})")
         except Exception as e:
-            logging.error(f"Failed to load embeddings file {embeddings_path}: {e}")
-            return None, None
-    else:
-        logging.error(f"Embeddings file not found: {embeddings_path}")
-        return None, None # Indicate index needs building
+            logger.error(f"Error loading embeddings from {embeddings_path}: {e}")
 
-    if os.path.exists(map_path):
+    if file_map_path.exists():
         try:
-            with open(map_path, 'rb') as f:
+            with open(file_map_path, 'rb') as f:
                 file_map = pickle.load(f)
-            logging.info(f"Loaded file map from {map_path} ({len(file_map)} entries)")
         except Exception as e:
-            logging.error(f"Failed to load file map {map_path}: {e}")
-            return embeddings, None # Return embeddings but indicate map error
-    else:
-        logging.error(f"File map not found: {map_path}")
-        return embeddings, None # Return embeddings but indicate map error
-
-    # Sanity check: number of embeddings should match number of files in map
-    # np shape access is used here
-    if embeddings is not None and file_map is not None and embeddings.shape[0] != len(file_map):
-        logging.warning(f"Mismatch between number of embeddings ({embeddings.shape[0]}) and file map entries ({len(file_map)}). Index might be inconsistent.")
-        # Decide how to handle this? For now, proceed but log warning.
+            logger.error(f"Error loading file map from {file_map_path}: {e}")
 
     return embeddings, file_map
 
@@ -192,12 +162,6 @@ def find_similar_notes(prerequisites: list[str], embeddings: Any, file_map: dict
         (best_matching_filepath, similarity_score).
         Returns an empty dict if prerequisites list is empty or embeddings are invalid.
     """
-    # --- Import heavy libraries here ---
-    import numpy as np
-    from sklearn.metrics.pairwise import cosine_similarity # Already lazy-loaded, but good to keep imports together
-    # SentenceTransformer is passed in as 'model', no need to import it here unless creating a new one.
-    # --- End import ---
-
     results = {}
     # np shape access is used here
     if not prerequisites or embeddings is None or embeddings.shape[0] == 0 or not file_map:

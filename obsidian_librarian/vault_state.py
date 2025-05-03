@@ -301,26 +301,31 @@ def get_file_details(relative_filepath: str, db_path: Path = DB_PATH) -> Optiona
      conn.close()
      return row 
 
-def get_max_mtime_from_db(db_path=DB_PATH) -> Optional[float]: # Return Optional[float]
+def get_max_mtime_from_db(db_path: Optional[Path] = None) -> Optional[float]:
     """Gets the maximum modification time recorded in the database for 'current' files."""
+    if db_path is None:
+        db_path = DB_PATH
+
     max_mtime = None
+    conn = None
     try:
-        # Ensure DB exists before connecting, or handle error gracefully
-        if not Path(db_path).exists():
+        if not db_path.exists():
              logger.warning(f"Database file not found at {db_path}, cannot get max mtime.")
              return None
 
-        conn = sqlite3.connect(db_path)
+        conn = get_db_connection(db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT MAX(mtime) FROM files WHERE status = 'current'")
         result = cursor.fetchone()
         if result and result[0] is not None:
             max_mtime = result[0]
-        conn.close()
-        # logger.debug(f"Max mtime from DB: {max_mtime}") # Optional debug
+        logger.debug(f"Max mtime from DB: {max_mtime}")
     except sqlite3.Error as e:
         logger.error(f"Database error querying max mtime from 'files' table: {e}")
         max_mtime = None # Return None on error
+    finally:
+        if conn:
+            conn.close()
     return max_mtime
 
 def get_last_scan_time(db_path: str) -> float:
@@ -369,16 +374,232 @@ def undo_last_change(db_path: str) -> Optional[str]:
     logging.warning("Undo functionality is not fully implemented.")
     return None # Placeholder return
 
-def get_all_files_from_db(db_path: Path = DB_PATH) -> List[Tuple[str, float, int]]:
+def get_all_files_from_db(db_path: Optional[Path] = None) -> List[Tuple[str, float, int]]:
     """Gets all 'current' files from the database."""
-    # ... (implementation) ...
+    if db_path is None:
+        db_path = DB_PATH
+    conn = None
     try:
         conn = get_db_connection(db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT path, mtime, size FROM files WHERE status = 'current'") # <-- Use 'files'
+        cursor.execute("SELECT path, mtime, size FROM files WHERE status = 'current'")
         files = [(row['path'], row['mtime'], row['size']) for row in cursor.fetchall()]
-        conn.close()
         return files
     except sqlite3.Error as e:
         logger.error(f"Database error getting all files: {e}")
         return []
+    finally:
+        if conn:
+            conn.close()
+
+# --- VaultStateManager Class ---
+
+class VaultStateManager:
+    """Manages the state of the Obsidian vault using an SQLite database."""
+
+    def __init__(self, vault_path: str, db_path: Optional[Path] = None):
+        """
+        Initializes the VaultStateManager.
+
+        Args:
+            vault_path: The absolute path to the Obsidian vault.
+            db_path: Optional path to the database file. Defaults to standard location.
+        """
+        self.vault_path = Path(vault_path)
+        self.db_path = db_path if db_path else DB_PATH
+        self.conn = None
+        try:
+            # Ensure DB is initialized before connecting
+            initialize_database(self.db_path)
+            self.conn = get_db_connection(self.db_path)
+            logger.debug(f"VaultStateManager initialized for vault: {self.vault_path}, DB: {self.db_path}")
+        except Exception as e:
+            logger.error(f"Failed to initialize VaultStateManager connection: {e}")
+            # Should we raise here? Or allow creation but fail on methods?
+            # For now, log and conn will be None, methods should check.
+            self.conn = None
+
+    def _scan_and_update(self, full_scan: bool, quiet: bool = False) -> Tuple[int, int, int]:
+        """Internal method to perform the actual scan (full or incremental)."""
+        if not self.conn:
+            logger.error("Database connection not established. Cannot perform scan.")
+            return 0, 0, 0 # Return zero counts
+
+        changes_made = False
+        added_count, modified_count, deleted_count = 0, 0, 0
+        processed_during_scan = {} # Files found on disk during this scan
+        scan_start_time = time.time()
+
+        cursor = self.conn.cursor()
+
+        try:
+            # Get current state from DB
+            cursor.execute("SELECT path, mtime, size FROM files WHERE status = 'current'")
+            db_files = {row['path']: {'mtime': row['mtime'], 'size': row['size']} for row in cursor.fetchall()}
+            db_paths_before_scan = set(db_files.keys())
+
+            scan_since_mtime = 0.0
+            if not full_scan:
+                max_mtime_result = cursor.execute("SELECT MAX(mtime) FROM files WHERE status = 'current'").fetchone()
+                if max_mtime_result and max_mtime_result[0] is not None:
+                    scan_since_mtime = max_mtime_result[0]
+                if not quiet:
+                    last_scan_dt = datetime.fromtimestamp(scan_since_mtime).strftime('%Y-%m-%d %H:%M:%S') if scan_since_mtime > 0 else "beginning"
+                    logger.info(f"Performing incremental scan for files modified since {last_scan_dt}...")
+            elif not quiet:
+                logger.info(f"Performing full scan of vault: {self.vault_path}...")
+
+            if not self.vault_path.is_dir():
+                 logger.error(f"Vault path '{self.vault_path}' not found during scan.")
+                 return 0, 0, 0
+
+            # --- Scan filesystem ---
+            for item in self.vault_path.rglob('*.md'): # Only scan markdown files
+                if item.is_file():
+                    try:
+                        stats = item.stat()
+                        # Skip if incremental and not modified since last known max mtime
+                        if not full_scan and stats.st_mtime <= scan_since_mtime:
+                            continue
+                        rel_path = item.relative_to(self.vault_path)
+                        rel_path_str = str(rel_path)
+                        processed_during_scan[rel_path_str] = {'mtime': stats.st_mtime, 'size': stats.st_size}
+                    except Exception as e:
+                         logger.warning(f"Could not process file {item}: {e}")
+
+            # --- Process scanned files (Additions/Modifications) ---
+            for rel_path_str, file_info in processed_during_scan.items():
+                db_entry = db_files.get(rel_path_str)
+                if db_entry is None:
+                    # New file
+                    logger.debug(f"Adding new file: {rel_path_str}")
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO files (path, mtime, size, status) VALUES (?, ?, ?, ?)",
+                        (rel_path_str, file_info['mtime'], file_info['size'], 'current')
+                    )
+                    added_count += 1
+                    changes_made = True
+                elif file_info['mtime'] > db_entry['mtime'] or file_info['size'] != db_entry['size']:
+                    # Modified file
+                    logger.debug(f"Updating modified file: {rel_path_str}")
+                    cursor.execute(
+                        "UPDATE files SET mtime = ?, size = ? WHERE path = ?",
+                        (file_info['mtime'], file_info['size'], rel_path_str)
+                    )
+                    modified_count += 1
+                    changes_made = True
+
+            # --- Deletion Check ---
+            # Determine paths potentially deleted based on scan type
+            if full_scan:
+                # In a full scan, any DB path not found on disk is deleted
+                deleted_paths = db_paths_before_scan - set(processed_during_scan.keys())
+            else:
+                # In incremental, check existence only for files *not* processed (i.e., older than scan_since_mtime)
+                # and not found in the current scan results (which handles modifications of older files)
+                paths_to_check_existence = db_paths_before_scan - set(processed_during_scan.keys())
+                deleted_paths = set()
+                existence_check_start_time = time.time()
+                for rel_path_str in paths_to_check_existence:
+                    abs_path = self.vault_path / rel_path_str
+                    if not abs_path.exists():
+                        deleted_paths.add(rel_path_str)
+                existence_check_duration = time.time() - existence_check_start_time
+                logger.debug(f"Incremental deletion check duration: {existence_check_duration:.4f}s for {len(paths_to_check_existence)} files")
+
+            # Mark deleted paths in DB
+            for rel_path_str in deleted_paths:
+                scan_type_log = "[Full Scan]" if full_scan else "[Incremental Scan]"
+                logger.debug(f"{scan_type_log} Marking deleted file: {rel_path_str}")
+                cursor.execute("UPDATE files SET status = 'deleted' WHERE path = ?", (rel_path_str,))
+                deleted_count += 1
+                changes_made = True
+
+            # --- Commit and report ---
+            if changes_made:
+                self.conn.commit()
+                if not quiet:
+                    summary = []
+                    if added_count: summary.append(f"{added_count} added")
+                    if modified_count: summary.append(f"{modified_count} modified")
+                    if deleted_count: summary.append(f"{deleted_count} deleted")
+                    scan_type = "Full scan" if full_scan else "Incremental scan"
+                    logger.info(f"{scan_type} complete. Changes: {', '.join(summary) if summary else 'None'}.")
+            elif not quiet:
+                scan_type = "Full scan" if full_scan else "Incremental scan"
+                logger.info(f"{scan_type} complete. No changes detected.")
+
+            scan_duration = time.time() - scan_start_time
+            logger.debug(f"Vault scan duration ({'full' if full_scan else 'incremental'}): {scan_duration:.2f} seconds. Added: {added_count}, Modified: {modified_count}, Deleted: {deleted_count}")
+
+            return added_count, modified_count, deleted_count
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error during scan: {e}")
+            # Optionally rollback changes if needed: self.conn.rollback()
+            return 0, 0, 0 # Return zero counts on error
+
+    def incremental_scan(self, quiet: bool = False) -> Tuple[int, int, int]:
+        """Performs an incremental scan of the vault."""
+        return self._scan_and_update(full_scan=False, quiet=quiet)
+
+    def full_scan(self, quiet: bool = False) -> Tuple[int, int, int]:
+        """Performs a full scan of the vault."""
+        return self._scan_and_update(full_scan=True, quiet=quiet)
+
+    def close(self):
+        """Closes the database connection."""
+        if self.conn:
+            logger.debug("Closing VaultStateManager DB connection.")
+            self.conn.close()
+            self.conn = None
+
+    def __enter__(self):
+        """Enter context manager."""
+        # Connection is already established in __init__ if successful
+        if not self.conn:
+             # Try to reconnect if initialization failed? Or just raise?
+             raise ConnectionError("VaultStateManager database connection failed on initialization.")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit context manager, ensuring connection is closed."""
+        self.close()
+
+# --- End VaultStateManager Class ---
+
+# Remove the old standalone update_vault_scan function if it exists
+# (The logic is now inside the VaultStateManager class)
+
+# Keep other standalone functions like record_access, get_recent_files etc. if needed
+# Make sure they use get_db_connection() or accept an explicit connection/cursor.
+
+# Example: Modify get_file_details to use the standard path getter
+def get_file_details(relative_filepath: str, db_path: Optional[Path] = None) -> Optional[sqlite3.Row]:
+     """Gets all details for a file from the database."""
+     if db_path is None:
+         db_path = DB_PATH
+
+     # Basic validation
+     if not relative_filepath or relative_filepath.startswith('/') or '..' in relative_filepath:
+         logger.warning(f"Invalid relative path provided to get_file_details: {relative_filepath}")
+         return None
+
+     conn = None
+     try:
+         conn = get_db_connection(db_path)
+         cursor = conn.cursor()
+         # Use path column name from CREATE TABLE statement
+         cursor.execute("SELECT * FROM files WHERE path = ?", (relative_filepath,))
+         row = cursor.fetchone()
+         return row
+     except sqlite3.Error as e:
+         logger.error(f"Database error in get_file_details for {relative_filepath}: {e}")
+         return None
+     finally:
+         if conn:
+             conn.close()
+
+# Remove or update other functions like get_file_history, get_recent_changes, undo_last_change
+# as they were placeholders or need significant implementation.
+# For example, history/undo would likely need a separate table or Git integration.

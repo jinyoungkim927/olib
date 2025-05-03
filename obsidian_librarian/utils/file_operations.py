@@ -3,13 +3,31 @@ from pathlib import Path
 import glob
 import re
 import logging
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from collections import Counter
 
 # Configure logging if needed for this module
 # logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
+
+# --- Constants ---
+# --- Define MAX_FILENAME_LENGTH here ---
+MAX_FILENAME_LENGTH = 200 # Example limit, adjust as needed
+# --- End Define ---
+
+# --- Define characters invalid in filenames across common OS ---
+# We will REMOVE these characters.
+# We will specifically ALLOW spaces now.
+INVALID_FILENAME_CHARS = r'[\\/:\*\?"<>\|]' # Removed space from this set
+
+# --- Define characters to simply replace with an underscore ---
+# This can include characters that might be technically valid but problematic
+# (e.g., leading/trailing dots, excessive consecutive spaces/underscores if desired)
+# For now, let's just focus on removing the truly invalid ones.
+# CHARS_TO_REPLACE_WITH_UNDERSCORE = r'\s+' # Example: Replace whitespace sequences (we are keeping single spaces now)
+
+# --- Helper Functions ---
 
 def get_markdown_files(directory_path: str) -> list[str]:
     """
@@ -39,34 +57,66 @@ def count_words(text: str) -> int:
 
 # You can add other file-related utility functions here 
 
-def sanitize_filename(name: str) -> str:
-    """Removes or replaces characters invalid for filenames."""
-    if not isinstance(name, str):
-        name = str(name) # Ensure input is a string
+def sanitize_filename(name: str, replacement: str = '_') -> str:
+    """
+    Sanitizes a string to be used as a valid filename.
+    Removes invalid characters and optionally replaces whitespace.
 
-    # Remove characters invalid in Windows/Linux/MacOS filenames
-    # Keep alphanumeric, spaces, hyphens, underscores, periods (for extension)
-    # Remove others. Adjust the regex as needed for your preferences.
-    name = re.sub(r'[<>:"/\\|?*]', '', name) # Basic invalid chars
+    Args:
+        name: The original string name.
+        replacement: The character to use for replacing invalid sequences (currently not used for spaces).
 
-    # Replace sequences of whitespace with a single underscore
-    name = re.sub(r'\s+', '_', name)
+    Returns:
+        A sanitized string suitable for use as a filename.
+    """
+    if not name:
+        return ""
 
-    # Optional: Replace other potentially problematic chars like apostrophes, commas etc.
-    # name = re.sub(r"[',;()&]", '', name)
+    # 1. Remove truly invalid characters
+    #    Characters like / \ : * ? " < > | are problematic on most OS
+    sanitized = re.sub(INVALID_FILENAME_CHARS, '', name)
 
-    # Remove leading/trailing underscores/spaces/periods
-    name = name.strip('_. ')
+    # 2. Handle leading/trailing whitespace and dots (often problematic)
+    sanitized = sanitized.strip().strip('.')
 
-    # Prevent names that are just dots or empty
-    if not name or name. Lstrip('.') == '':
-        return "untitled_note"
+    # 3. Collapse multiple consecutive spaces into one (optional, but good practice)
+    sanitized = re.sub(r'\s+', ' ', sanitized)
 
-    # Limit length (optional, be careful not to cut off extensions if used elsewhere)
-    # max_len = 100
-    # name = name[:max_len]
+    # --- Removed: Replacing spaces with underscores ---
+    # # 4. Replace remaining whitespace (now just single spaces) with underscore
+    # #    Comment this out to allow spaces in filenames
+    # # sanitized = re.sub(r'\s', replacement, sanitized)
+    # --- End Removed ---
 
-    return name
+    # 5. Ensure the filename isn't empty after sanitization
+    if not sanitized:
+        # Maybe return a default name or raise an error?
+        # For now, let's return a single underscore.
+        logger.warning(f"Filename '{name}' became empty after sanitization.")
+        return "_"
+
+    # 6. Limit length (optional, but good practice for some filesystems)
+    # max_len = 250 # Example limit
+    # if len(sanitized) > max_len:
+    #     # Find the last space within the limit to avoid cutting words
+    #     ext = ""
+    #     base = sanitized
+    #     if '.' in sanitized:
+    #         parts = sanitized.rsplit('.', 1)
+    #         base = parts[0]
+    #         ext = '.' + parts[1]
+    #
+    #     if len(base) > max_len - len(ext):
+    #         cutoff_point = base[:max_len - len(ext)].rfind(' ')
+    #         if cutoff_point != -1 and cutoff_point > max_len // 2: # Cut at space if reasonable
+    #              base = base[:cutoff_point]
+    #         else: # Otherwise just truncate
+    #              base = base[:max_len - len(ext)]
+    #         sanitized = base.strip() + ext
+    #     logger.info(f"Truncated sanitized filename to {max_len} chars: {sanitized}")
+
+
+    return sanitized
 
 def read_note_content(file_path: Path) -> Optional[str]:
     """
@@ -175,15 +225,12 @@ def find_note_in_vault(vault_path: str, note_identifier: str) -> Optional[Path]:
 
 
     # 3. Deduplicate and check results
-    # Use set for efficient deduplication based on the resolved Path objects
     unique_matches = list(set(potential_matches))
 
     if len(unique_matches) == 0:
-        logging.info(f"No markdown note found matching identifier '{original_identifier}' in vault '{vault_path}'.")
         return None
     elif len(unique_matches) == 1:
         found_path = unique_matches[0]
-        logging.info(f"Found unique markdown note match: {found_path}")
         return found_path
     else: # len > 1
         # --- Refined Ambiguity Check ---
@@ -201,7 +248,6 @@ def find_note_in_vault(vault_path: str, note_identifier: str) -> Optional[Path]:
                 # If all point to the same file, it's not truly ambiguous.
                 # Return the first one found (or potentially try to find one with preferred casing).
                 found_path = unique_matches[0]
-                logging.info(f"Found unique markdown note match (resolving case ambiguity): {found_path}")
                 return found_path
             else:
                 # Genuinely ambiguous match (different files)
@@ -236,7 +282,6 @@ def get_popular_tags(vault_path: str, min_count: int = 5) -> List[str]:
     """
     tag_counts = get_all_tag_counts(vault_path) # Use the new function
     popular_tags = [tag for tag, count in tag_counts.items() if count >= min_count]
-    logger.info(f"Found {len(popular_tags)} tags appearing at least {min_count} times.")
     return popular_tags
 
 def get_all_tag_counts(vault_path: str) -> Dict[str, int]:
@@ -274,7 +319,6 @@ def get_all_tag_counts(vault_path: str) -> Dict[str, int]:
         except Exception as e:
             logger.warning(f"Could not read or parse tags from {file_path.name}: {e}")
 
-    logger.info(f"Counted {len(tag_counts)} unique tags across {len(md_files)} notes.")
     return tag_counts
 
 # --- End function ---
