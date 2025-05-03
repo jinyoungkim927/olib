@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import logging
 from collections import deque # For the queue
+import re # <-- Add this import
+from sklearn.metrics.pairwise import cosine_similarity # <-- Add this import
 
 # For Git history (optional)
 try:
@@ -93,10 +95,9 @@ def private(): # Placeholder for future private content check
               help=f'Similarity threshold for title matching (0.0-1.0). Default: {DEFAULT_TITLE_SIMILARITY_THRESHOLD}')
 @click.option('--llm-model', default=None, help='Specify the LLM model to use (e.g., gpt-4o-mini). Uses default if not set.')
 @click.option('--embedding-model', default=None, help='Embedding model for similarity checks. Uses config default.')
-@click.option('--min-tag-count', type=int, default=5, help='Minimum occurrences for a tag to be considered popular for suggestions.')
 @click.option('--recursive', '-r', is_flag=True, default=False, help='Recursively check prerequisites for generated notes.')
 @click.option('--min-tag-count', type=int, default=10, help='Minimum occurrences for a suggested tag to be kept (0 keeps all).') # Default 10
-def prerequisites(note, content_threshold, title_threshold, llm_model, embedding_model, min_tag_count, recursive): # Added recursive, updated min_tag_count help
+def prerequisites(note, content_threshold, title_threshold, llm_model, embedding_model, min_tag_count, recursive): # Removed duplicate param
     """Analyzes a note to find prerequisite concepts and checks if they exist in the vault."""
     import numpy as np
     from sentence_transformers import SentenceTransformer
@@ -222,35 +223,41 @@ def prerequisites(note, content_threshold, title_threshold, llm_model, embedding
         return
 
     # --- Load or Generate Prerequisite Embeddings (Cache) ---
+    # Load cache initially
     prereq_cache = load_prereq_cache()
-    prereqs_to_encode = [p for p in prerequisites_list if p not in prereq_cache]
+    # Initialize map with cached items relevant to initial prerequisites
     prereq_embeddings_map = {p: prereq_cache[p] for p in prerequisites_list if p in prereq_cache}
+    # Identify initial prerequisites needing encoding
+    initial_prereqs_to_encode = [p for p in prerequisites_list if p not in prereq_cache]
 
-    if prereqs_to_encode:
-        click.echo(f"Generating embeddings for {len(prereqs_to_encode)} new prerequisite(s)...")
+    if initial_prereqs_to_encode:
+        click.echo(f"Generating embeddings for {len(initial_prereqs_to_encode)} initial prerequisite(s)...")
         try:
-            new_embeddings = model.encode(prereqs_to_encode, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=True)
-            for prereq, embedding in zip(prereqs_to_encode, new_embeddings):
+            # Encode only the initial missing ones in batch
+            new_embeddings = model.encode(initial_prereqs_to_encode, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=True)
+            for prereq, embedding in zip(initial_prereqs_to_encode, new_embeddings):
                 prereq_embeddings_map[prereq] = embedding
                 prereq_cache[prereq] = embedding # Update cache
             save_prereq_cache(prereq_cache) # Save updated cache
         except Exception as e:
-            click.secho(f"Error generating prerequisite embeddings: {e}", fg="red")
-            # Continue with cached embeddings if possible, or handle error appropriately
-            # For now, we'll just log and potentially miss some comparisons
-            logger.exception("Prerequisite embedding generation failed")
+            click.secho(f"Error generating initial prerequisite embeddings: {e}", fg="red")
+            logger.exception("Initial prerequisite embedding generation failed")
+            # Decide if we should exit or continue with potentially missing embeddings
 
     # --- Generate Embeddings for Note Stems ---
     click.echo("Generating embeddings for note titles...")
-    stem_embeddings_map = {} # Initialize as empty
+    stem_embeddings_map = {} # Initialize as empty map
+    stem_embeddings = None   # Initialize embeddings array as None
     if vault_stems:
         try:
+            # Keep the array for similarity calculation
             stem_embeddings = model.encode(vault_stems, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=True)
+            # Keep the map for quick lookup if needed elsewhere, though not strictly necessary for similarity
             stem_embeddings_map = {stem_lower: emb for stem_lower, emb in zip(vault_stems_lower, stem_embeddings)}
         except Exception as e:
             click.secho(f"Error generating note title embeddings: {e}", fg="red")
             logger.exception("Stem embedding generation failed")
-            # stem_embeddings_map remains empty, title check will be skipped
+            # stem_embeddings remains None, title similarity check will be skipped
     else:
         click.echo("No note titles found in index to generate embeddings for.")
 
@@ -269,89 +276,117 @@ def prerequisites(note, content_threshold, title_threshold, llm_model, embedding
 
     # --- Process Queue ---
     click.echo("\n--- Processing Prerequisites ---")
-    # Instantiate FormatFixer outside the loop
-    formatter = FormatFixer(verbose=False) # Don't need verbose output from formatter itself
+    formatter = FormatFixer(verbose=False)
 
     while prereq_queue:
         current_topic = prereq_queue.popleft()
 
         if current_topic in processed_topics:
-            continue # Already processed this topic's prerequisites
+            continue
 
         if current_topic in topic_status and topic_status[current_topic] != 'missing':
-             # Already found or generated in a previous step, ensure it's processed
              processed_topics.add(current_topic)
              continue
 
         click.echo(f"\nChecking prerequisite: '{current_topic}'")
-        topic_status[current_topic] = 'processing' # Mark as processing
+        topic_status[current_topic] = 'processing'
 
-        # --- Compare Prerequisite to Vault Notes ---
         prereq_lower = current_topic.lower()
         found = False
         match_details = {"type": "None", "score": 0.0, "path": ""}
-        prereq_embedding = prereq_embeddings_map.get(current_topic) # Get embedding calculated earlier
+        # Ensure embedding exists for comparison, retrieve from map
+        prereq_embedding = prereq_embeddings_map.get(current_topic)
+        if prereq_embedding is None and current_topic in prereq_cache:
+             # Might have been added to cache during recursion but not yet to map
+             prereq_embedding = prereq_cache[current_topic]
+             prereq_embeddings_map[current_topic] = prereq_embedding # Add to map
 
-        # 1. Check Exact Title Match
-        try:
-            exact_match_index = vault_stems_lower.index(prereq_lower)
-            match_path_rel = vault_file_map[exact_match_index]
-            match_path_abs = vault_path_obj / match_path_rel
-            match_details = {"type": "Exact Title", "score": 1.0, "path": str(match_path_abs.relative_to(vault_path_obj))}
-            found = True
-            click.echo(f"  -> Found existing note (Exact Title): {match_details['path']}")
-            topic_status[current_topic] = 'found'
-        except ValueError:
-            pass # Not found by exact title
-        except Exception as e:
-             logger.warning(f"Error during exact title check for '{current_topic}': {e}")
+        if prereq_embedding is None:
+             logger.warning(f"Embedding for '{current_topic}' not found in map or cache. Comparison will be skipped.")
+             # Decide how to handle - skip comparison? try to generate now?
+             # For now, we skip comparisons if embedding is missing.
 
+        # --- Compare Prerequisite to Vault Notes (Only if embedding exists) ---
+        if prereq_embedding is not None:
+            # 1. Check Exact Title Match (Doesn't need embedding)
+            try:
+                exact_match_index = vault_stems_lower.index(prereq_lower)
+                match_path_rel = vault_file_map[exact_match_index]
+                match_path_abs = vault_path_obj / match_path_rel
+                match_details = {"type": "Exact Title", "score": 1.0, "path": str(match_path_abs.relative_to(vault_path_obj))}
+                found = True
+                click.secho(f"  -> Found existing note (Exact Title): {match_details['path']}", fg="green")
+                topic_status[current_topic] = 'found'
+            except ValueError:
+                pass # Not found by exact title
+            except Exception as e:
+                 logger.warning(f"Error during exact title check for '{current_topic}': {e}")
 
-        # 2. Check Similar Title Match (if not found and embedding exists)
-        if not found and prereq_embedding is not None and stem_embeddings_map:
-            # Find the index corresponding to current_topic in the stem_embeddings_map
-            # This is complex because the map was built only on initial prereqs.
-            # Let's re-calculate similarity just for this one topic if needed.
-            # OR: A better approach is to generate embeddings for ALL potential topics upfront.
-            # For now, let's skip complex title similarity for recursive steps if embedding wasn't pre-calculated.
-            # We rely on content similarity or exact match for recursive steps primarily.
-            # TODO: Refactor embedding generation to handle dynamic topics if high-accuracy title match is needed recursively.
-            pass # Simplified for now
+            # 2. Check Similar Title Match (if not found and embeddings exist)
+            if not found and stem_embeddings is not None and stem_embeddings.shape[0] > 0:
+                try:
+                    title_similarities = cosine_similarity(prereq_embedding.reshape(1, -1), stem_embeddings)[0]
+                    best_title_match_idx = np.argmax(title_similarities)
+                    title_similarity_score = title_similarities[best_title_match_idx]
 
-        # 3. Check Similar Content Match (if not found and embedding exists)
-        if not found and prereq_embedding is not None and vault_embeddings is not None and vault_embeddings.shape[0] > 0:
-             # Similar issue: content_similarity_matrix was based on initial prereqs.
-             # Let's calculate similarity for the current topic against all vault embeddings.
+                    if title_similarity_score >= title_threshold:
+                        match_path_rel = vault_file_map[best_title_match_idx]
+                        match_path_abs = vault_path_obj / match_path_rel
+                        # Avoid matching the original note itself by path
+                        if match_path_abs != full_note_path:
+                            match_details = {"type": "Similar Title", "score": float(title_similarity_score), "path": str(match_path_abs.relative_to(vault_path_obj))}
+                            found = True
+                            # Use yellow for similar title match
+                            click.secho(f"  -> Found existing note (Similar Title): {match_details['path']} (Score: {match_details['score']:.2f})", fg="yellow")
+                            topic_status[current_topic] = 'found'
+                except Exception as e:
+                    logger.warning(f"Error during title similarity check for '{current_topic}': {e}")
+
+            # 3. Check Similar Content Match (if not found and embeddings exist)
+            elif not found and vault_embeddings is not None and vault_embeddings.shape[0] > 0:
+                 try:
+                     content_similarities = cosine_similarity(prereq_embedding.reshape(1, -1), vault_embeddings)[0]
+                     best_content_match_idx = np.argmax(content_similarities)
+                     content_similarity_score = content_similarities[best_content_match_idx]
+
+                     if content_similarity_score >= content_threshold:
+                         match_path_rel = vault_file_map[best_content_match_idx]
+                         match_path_abs = vault_path_obj / match_path_rel
+                         # Avoid matching the original note itself
+                         if match_path_abs != full_note_path:
+                             match_details = {"type": "Similar Content", "score": float(content_similarity_score), "path": str(match_path_abs.relative_to(vault_path_obj))}
+                             found = True
+                             # Use yellow for similar content match as well
+                             click.secho(f"  -> Found existing note (Similar Content): {match_details['path']} (Score: {match_details['score']:.2f})", fg="yellow")
+                             topic_status[current_topic] = 'found'
+                 except Exception as e:
+                     logger.warning(f"Error during content similarity check for '{current_topic}': {e}")
+        else:
+             # If embedding was None, skip similarity checks
+             click.echo(f"  -> Skipping similarity checks for '{current_topic}' (missing embedding).")
+             # Check for exact title match anyway, as it doesn't need embedding
              try:
-                 similarities = cosine_similarity(prereq_embedding.reshape(1, -1), vault_embeddings)[0]
-                 best_content_match_idx = np.argmax(similarities)
-                 content_similarity_score = similarities[best_content_match_idx]
-
-                 if content_similarity_score >= content_threshold:
-                     match_path_rel = vault_file_map[best_content_match_idx]
-                     match_path_abs = vault_path_obj / match_path_rel
-                     # Avoid matching the original note itself
-                     if match_path_abs != full_note_path:
-                         match_details = {"type": "Similar Content", "score": float(content_similarity_score), "path": str(match_path_abs.relative_to(vault_path_obj))}
-                         found = True
-                         click.echo(f"  -> Found existing note (Similar Content): {match_details['path']} (Score: {match_details['score']:.2f})")
-                         topic_status[current_topic] = 'found'
+                 exact_match_index = vault_stems_lower.index(prereq_lower)
+                 match_path_rel = vault_file_map[exact_match_index]
+                 match_path_abs = vault_path_obj / match_path_rel
+                 match_details = {"type": "Exact Title", "score": 1.0, "path": str(match_path_abs.relative_to(vault_path_obj))}
+                 found = True
+                 click.secho(f"  -> Found existing note (Exact Title): {match_details['path']}", fg="green")
+                 topic_status[current_topic] = 'found'
+             except ValueError:
+                 pass # Not found by exact title
              except Exception as e:
-                 logger.warning(f"Error during content similarity check for '{current_topic}': {e}")
+                  logger.warning(f"Error during exact title check (no embedding) for '{current_topic}': {e}")
 
 
         # --- Handle Found or Missing ---
         if found:
-            processed_topics.add(current_topic) # Mark as processed if found
-            # Optionally, ask if user wants to check prerequisites for the *found* note
-            # if recursive and click.confirm(f"Note for '{current_topic}' found. Check its prerequisites recursively?"):
-            #    # Add logic here to read the found note and get its prerequisites
-            #    pass
+            processed_topics.add(current_topic)
             continue # Move to the next item in the queue
 
         # --- Prerequisite is Missing: Offer to Generate ---
-        click.echo(f"  -> No existing note found for '{current_topic}'.")
-        topic_status[current_topic] = 'missing' # Mark as missing initially
+        click.echo(f"  -> No existing note found matching '{current_topic}'.")
+        topic_status[current_topic] = 'missing'
 
         # --- Generate Note Logic ---
         if click.confirm(f"  -> Attempt to AI-generate placeholder note for '{current_topic}'?"):
@@ -431,44 +466,62 @@ def prerequisites(note, content_threshold, title_threshold, llm_model, embedding
 
                     # --- Recursive Step ---
                     if recursive:
-                        if click.confirm(f"  -> Check prerequisites for the newly generated note '{current_topic}'?"):
+                        if click.confirm(f"  -> Recursively check prerequisites for the newly generated note '{current_topic}'?"):
                             click.echo(f"    -> Requesting prerequisites for '{current_topic}' from LLM...")
-                            # Read the content we just wrote (excluding tags/footer for LLM)
                             new_note_content_for_llm = formatted_content.strip()
                             new_prereqs_list = get_prerequisites_from_llm(new_note_content_for_llm, model_name=llm_model_to_use)
 
                             if new_prereqs_list:
-                                # Filter out self-reference
                                 new_prereqs_list = [p for p in new_prereqs_list if p.lower() != current_topic.lower()]
                                 click.echo(f"      -> Identified new prerequisites for '{current_topic}': {new_prereqs_list}")
 
                                 if new_prereqs_list:
-                                     # Add to graph
-                                     dependency_graph[current_topic] = new_prereqs_list
-                                     # Add to queue if not already processed or in queue
-                                     newly_added_to_queue = 0
-                                     for new_prereq in new_prereqs_list:
-                                         if new_prereq not in processed_topics and new_prereq not in prereq_queue:
-                                             # Check if embedding exists, if not, generate it?
-                                             # For now, add to queue; comparison will handle missing embedding later.
-                                             if new_prereq not in prereq_embeddings_map:
-                                                  # TODO: Handle dynamic embedding generation if needed
-                                                  logger.warning(f"Embedding for new prerequisite '{new_prereq}' not pre-calculated. Comparison might be limited.")
-                                             prereq_queue.append(new_prereq)
-                                             topic_status[new_prereq] = 'missing' # Assume missing until checked
-                                             newly_added_to_queue += 1
-                                     if newly_added_to_queue > 0:
-                                         click.echo(f"      -> Added {newly_added_to_queue} new prerequisite(s) to the processing queue.")
+                                    dependency_graph[current_topic] = new_prereqs_list
+                                    newly_added_to_queue = 0
+                                    prereqs_needing_new_embeddings = [] # Collect prerequisites needing embedding
+
+                                    for new_prereq in new_prereqs_list:
+                                        if new_prereq not in processed_topics and new_prereq not in prereq_queue:
+                                            prereq_queue.append(new_prereq)
+                                            topic_status[new_prereq] = 'missing' # Assume missing
+                                            newly_added_to_queue += 1
+                                            # Check if embedding exists in cache or map, if not, mark for encoding
+                                            if new_prereq not in prereq_embeddings_map and new_prereq not in prereq_cache:
+                                                prereqs_needing_new_embeddings.append(new_prereq)
+                                            elif new_prereq in prereq_cache and new_prereq not in prereq_embeddings_map:
+                                                 # Add from cache to map if needed
+                                                 prereq_embeddings_map[new_prereq] = prereq_cache[new_prereq]
+
+
+                                    # --- Generate embeddings for newly discovered prerequisites ---
+                                    if prereqs_needing_new_embeddings:
+                                        click.echo(f"      -> Generating embeddings for {len(prereqs_needing_new_embeddings)} newly discovered prerequisite(s)...")
+                                        try:
+                                            # Encode in batch
+                                            new_recursive_embeddings = model.encode(prereqs_needing_new_embeddings, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False) # No progress bar for recursive steps
+                                            for prereq_name, embedding in zip(prereqs_needing_new_embeddings, new_recursive_embeddings):
+                                                prereq_embeddings_map[prereq_name] = embedding
+                                                prereq_cache[prereq_name] = embedding # Update cache
+                                            save_prereq_cache(prereq_cache) # Save updated cache immediately
+                                            click.echo(f"      -> Embeddings generated and cached.")
+                                        except Exception as e:
+                                            click.secho(f"      -> Error generating recursive prerequisite embeddings: {e}", fg="red")
+                                            logger.exception("Recursive prerequisite embedding generation failed")
+                                            # Continue, but comparisons for these might fail later
+
+                                    if newly_added_to_queue > 0:
+                                        click.echo(f"      -> Added {newly_added_to_queue} new prerequisite(s) to the processing queue.")
                                 else:
-                                     click.echo(f"      -> No further external prerequisites identified for '{current_topic}'.")
-                                     dependency_graph.setdefault(current_topic, []) # Ensure it has an entry even if empty
+                                    click.echo(f"      -> No further external prerequisites identified for '{current_topic}'.")
+                                    dependency_graph.setdefault(current_topic, [])
                             else:
                                 click.echo(f"    -> LLM did not identify prerequisites for '{current_topic}'.")
-                                dependency_graph.setdefault(current_topic, []) # Ensure it has an entry even if empty
+                                dependency_graph.setdefault(current_topic, [])
                         else:
-                             dependency_graph.setdefault(current_topic, []) # Ensure it has an entry even if empty
+                             click.echo(f"    -> Skipping recursive check for '{current_topic}'.")
+                             dependency_graph.setdefault(current_topic, [])
 
-                    else: # Not recursive, ensure graph entry exists
+                    else: # Not recursive
                         dependency_graph.setdefault(current_topic, [])
 
                 except Exception as e:
@@ -494,17 +547,8 @@ def prerequisites(note, content_threshold, title_threshold, llm_model, embedding
 
     # --- Report Results / ASCII Diagram ---
     click.echo("\n--- Prerequisite Analysis Complete ---")
-    click.echo("Diagram Key: [✓] Found, [+] Generated, [?] Missing, [✗] Failed, [»] Skipped, [●] Original Note")
-
-    # Build the final graph structure (ensure all topics have entries)
-    all_topics_in_graph = set(dependency_graph.keys())
-    for children in dependency_graph.values():
-        all_topics_in_graph.update(children)
-    for topic in all_topics_in_graph:
-        dependency_graph.setdefault(topic, []) # Ensure all nodes exist as keys
-
-    # Print the tree starting from the original note
-    print_tree(dependency_graph, original_note_topic, topic_status)
+    click.echo("Diagram Key: [✓] Found (Green), [+] Generated (Yellow), [?] Missing (Red), [✗] Failed (Red), [»] Skipped (Grey), [●] Original (Blue)")
+    print_tree_top_down_colored(dependency_graph, original_note_topic, topic_status, prefix="")
 
     end_time = time.time()
     click.echo(f"\nAnalysis finished in {end_time - start_time:.2f} seconds.")
@@ -513,34 +557,50 @@ def prerequisites(note, content_threshold, title_threshold, llm_model, embedding
 # check.add_command(semantic)
 # check.add_command(prereq) # Already decorated
 
-# --- Helper function for ASCII tree ---
-def print_tree(graph, topic, status, indent="", is_last=True, processed=None):
-    """Prints an ASCII representation of the prerequisite tree."""
+# --- Helper function for ASCII tree (Connecting Lines, Colored) ---
+def print_tree_top_down_colored(graph, topic, status, prefix="", is_last=True, processed=None):
+    """Prints a top-down, colored ASCII representation of the prerequisite tree with connecting lines."""
     if processed is None:
         processed = set()
-    # Basic cycle detection/repeated node printing
+
+    # Use a different marker for recursive links to avoid confusion with standard connectors
     if topic in processed:
         connector = "└─>" if is_last else "├─>"
-        click.echo(f"{indent}{connector} {topic} (*recursive link*)")
+        click.secho(f"{prefix}{connector} {topic} (*recursive link*)", fg="bright_black")
         return
     processed.add(topic)
 
-    marker = "└─ " if is_last else "├─ "
-    status_marker = {
-        'found': '✓',      # Note exists in vault
-        'generated': '+',  # Note was generated in this run
-        'missing': '?',    # Note is missing and was not generated
-        'processing': '…', # Currently being processed (shouldn't appear in final tree)
-        'failed': '✗',     # Generation/saving failed
-        'skipped': '»',    # Skipped (e.g., already exists)
-        'original': '●'    # The starting note
-    }.get(status.get(topic, 'missing'), '?') # Default to missing
+    current_status = status.get(topic, 'missing')
+    status_marker_map = {
+        'found': ('✓', "green"),
+        'generated': ('+', "yellow"),
+        'missing': ('?', "red"),
+        'failed': ('✗', "red"),
+        'skipped': ('»', "bright_black"),
+        'original': ('●', "blue"),
+        'processing': ('…', "magenta") # Should ideally not appear
+    }
+    marker, color = status_marker_map.get(current_status, ('?', "red"))
 
-    click.echo(f"{indent}{marker}[{status_marker}] {topic}")
-    child_indent = indent + ("    " if is_last else "│   ")
+    # Determine the connector for the current node
+    # The very first node (original) doesn't get a connector prefix part
+    if prefix == "": # Special case for the root node
+        connector_str = ""
+        node_prefix = ""
+    else:
+        connector_str = "└─ " if is_last else "├─ "
+        node_prefix = prefix
+
+    # Print the current node line
+    click.secho(f"{node_prefix}{connector_str}[{marker}] {topic}", fg=color)
+
+    # Prepare the prefix for children
+    # Add pipe or space based on whether this node is the last child
+    child_prefix = prefix + ("    " if is_last else "│   ")
 
     children = graph.get(topic, [])
     for i, child in enumerate(children):
-        # Pass a copy of the processed set for each branch
-        print_tree(graph, child, status, child_indent, i == len(children) - 1, processed.copy())
+        is_last_child = (i == len(children) - 1)
+        # Pass the updated prefix and is_last status to the recursive call
+        print_tree_top_down_colored(graph, child, status, child_prefix, is_last_child, processed.copy())
 # --- End ASCII tree helper ---
