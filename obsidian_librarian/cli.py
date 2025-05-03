@@ -13,14 +13,15 @@ from .commands import (
     history,
     undo,
     config as config_cmd,
-    index as index_cmd # Add the new index command module
+    index as index_cmd,
+    analytics as analytics_cmd # Import the analytics module
 )
 # Import config utility functions if needed elsewhere, but not the command itself
 # from .config import get_config # Example if needed
 
 # Import specific command functions/groups
 # from .commands.link import link_command # <-- Comment out this line
-from .commands.analytics import run_analytics
+# from .commands.analytics import run_analytics
 # Import the config command from its actual location
 from .commands.config import manage_config as config_command
 from pathlib import Path
@@ -36,7 +37,7 @@ from .commands.index import _perform_index_build
 # --- End import ---
 
 # Commands that should NOT trigger *any* auto-updates (history or embeddings)
-COMMANDS_TO_SKIP_UPDATES = ['config', 'index', 'init'] # Add 'index' group
+COMMANDS_TO_SKIP_UPDATES = ['config', 'index', 'init', 'analytics'] # Add 'analytics'
 
 # --- Configure Root Logger Early ---
 # Set the root logger level to WARNING to suppress INFO messages from libraries like NumExpr
@@ -45,10 +46,18 @@ logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
 # Optional: Set NumExpr threads to potentially silence its specific info message
 # os.environ['NUMEXPR_MAX_THREADS'] = '8' # Or another number based on your cores
 
-@click.group()
-@click.version_option()
-def main():
-    """Obsidian Librarian: CLI tool for managing your Obsidian vault."""
+# --- Define Context Settings ---
+CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+
+# --- Main CLI Group ---
+@click.group(context_settings=CONTEXT_SETTINGS)
+@click.version_option(package_name='obsidian-librarian')
+@click.pass_context
+def cli(ctx, **kwargs):
+    """Obsidian Librarian: Manage and enhance your Obsidian vault."""
+    # Basic context setup if needed
+    ctx.ensure_object(dict)
+
     # Check if config needs setup before running any command (except init/config)
     ctx = click.get_current_context()
     if ctx.invoked_subcommand not in ['init', 'config']:
@@ -71,7 +80,6 @@ def main():
             _check_and_run_embedding_update(db_path)
             # --- End passing db_path ---
     # --- End auto-update checks ---
-
 
 # --- Modify this function to return db_path ---
 def _check_and_run_auto_update() -> Tuple[bool, Optional[str]]:
@@ -165,20 +173,29 @@ def _check_and_run_embedding_update(db_path: str): # <-- Accept db_path as strin
         logging.exception("Embedding update check failed")
 # --- End of new function ---
 
-
 # Add command groups
-main.add_command(format.format_notes, name="format")
-main.add_command(check.check)
-main.add_command(search.search)
-main.add_command(notes.notes)
-main.add_command(history.history)
-main.add_command(undo.undo)
-main.add_command(config_cmd.manage_config, name="config")
-main.add_command(index_cmd.index) # Add the index group
-# main.add_command(link_command) # Removed
-main.add_command(run_analytics, name="analytics")
+cli.add_command(format.format_notes, name="format")
+cli.add_command(check.check)
+cli.add_command(search.search)
+cli.add_command(notes.notes)
+cli.add_command(history.history)
+cli.add_command(undo.undo)
+cli.add_command(config_cmd.manage_config, name="config")
+cli.add_command(index_cmd.index, name="index")
+cli.add_command(analytics_cmd.analytics, name="analytics")
 # main.add_command(update_index_command) # Remove old standalone update-index if it exists
 
+# --- Entry Point ---
+def main():
+    # Check for required dependencies early? (Optional)
+    # try:
+    #     import pandas
+    #     import numpy
+    # except ImportError as e:
+    #     click.echo(f"Missing dependency: {e}. Some commands might not work.", err=True)
+    #     click.echo("Consider running: pip install pandas numpy", err=True)
+
+    cli(obj={}) # Pass an empty object for context if needed
 
 if __name__ == '__main__':
     main()

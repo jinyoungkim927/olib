@@ -147,7 +147,7 @@ def format_file(file_path, dry_run=False, backup=True, verbose=False):
                 for i in range(min(len(orig_lines), len(mod_lines))):
                     if i >= len(orig_lines) or i >= len(mod_lines):
                         break
-                    if orig_lines[i] \!= mod_lines[i]:
+                    if orig_lines[i] != mod_lines[i]:
                         print(f"  - {orig_lines[i]}")
                         print(f"  + {mod_lines[i]}")
                         if i > 5:  # Just show a few examples
@@ -251,7 +251,7 @@ def undo_latest():
         print(f"This will restore {len(modified_files)} files to their previous state.")
         
         confirm = input("Continue? (y/n): ").lower()
-        if confirm \!= 'y':
+        if confirm != 'y':
             print("Operation cancelled.")
             return
         

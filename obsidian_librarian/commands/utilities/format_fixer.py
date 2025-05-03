@@ -6,9 +6,13 @@ import json
 from datetime import datetime
 from pathlib import Path
 import re
+import shutil
+from typing import Optional
 
 # from ..format import fix_math_formatting
-from ...config import get_config
+from obsidian_librarian.config import get_config
+# Import formatting functions that were in utils
+# from ...utils.formatting import format_math_blocks, format_code_blocks # We'll integrate these
 
 class FormatFixer:
     """A reliable utility to format markdown files in Obsidian vaults"""
@@ -35,8 +39,11 @@ class FormatFixer:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # Apply formatter
-            modified_content = self.apply_all_fixes(content)
+            # Extract filename without extension for title check
+            filename_base = Path(file_path).stem
+
+            # Apply formatter, passing filename
+            modified_content = self.apply_all_fixes(content, filename_base)
             
             # Check if changes were made
             is_changed = content != modified_content
@@ -150,118 +157,197 @@ class FormatFixer:
         except Exception as e:
             print(f"Warning: Could not save history file: {e}")
 
-    def apply_all_fixes(self, text: str) -> str:
+    def apply_all_fixes(self, text: str, filename_base: Optional[str] = None) -> str:
         """
         Applies a sequence of formatting fixes to the input text.
 
         Args:
             text: The raw text content of a note.
+            filename_base: The base name of the file (without extension), used for title check.
 
         Returns:
             The text content after applying all registered fixes.
         """
         original_text = text
 
+        # --- Preserve code blocks ---
+        code_blocks = {}
+        placeholder_template = "___CODE_BLOCK_PLACEHOLDER_{}___"
+        for i, match in enumerate(re.finditer(r'```.*?```', text, re.DOTALL)):
+            placeholder = placeholder_template.format(i)
+            code_blocks[placeholder] = match.group(0)
+            text = text.replace(match.group(0), placeholder, 1)
+
         # --- Apply fixes in a specific order ---
+
+        # 0. Remove duplicate H1 title if it matches filename
+        if filename_base:
+            text = self._remove_duplicate_title(text, filename_base)
 
         # 1. Fix escaped LaTeX delimiters ( \$...\$ -> $...$ )
         text = self._fix_escaped_latex_delimiters(text)
 
-        # 2. Fix content within math blocks (e.g., \_ -> _)
+        # 2. Convert LaTeX delimiters (\( -> $, \[ -> $$)
+        text = self._convert_latex_delimiters(text)
+
+        # 3. Fix content within math blocks (e.g., \_ -> _, [[Link]] -> Link)
         text = self._fix_math_content(text)
 
-        # 3. Fix bullet point indentation (spaces -> tabs)
+        # 4. Fix spacing around inline math ($ ... $ -> $...$, word$ -> word $, $word -> $ word)
+        text = self._fix_inline_math_spacing(text)
+
+        # 5. Fix bullet point indentation (spaces -> tabs)
         text = self._fix_bullet_indentation(text)
 
-        # 4. Add other fixes here if needed
-        # ... etc ...
+        # 6. Fix hashtag brackets (#[[tag]] -> #tag, #[tag]-[[subtag]] -> #tag-subtag)
+        text = self._fix_hashtag_brackets(text)
+
+        # 7. Fix malformed wiki links (nested, multiple brackets)
+        text = self._fix_wiki_links(text)
+
+        # 8. Remove __SIMPLE_LINK__ placeholders
+        text = self._remove_simple_link_placeholders(text)
+
+        # 9. Ensure block math ($$) are on their own lines
+        text = self._format_math_blocks(text)
+
+        # --- Restore code blocks ---
+        # Must happen before formatting code blocks to avoid adding newlines inside them
+        for placeholder, original in code_blocks.items():
+            text = text.replace(placeholder, original, 1)
+
+        # 10. Ensure code blocks (```) are on their own lines
+        # Apply this *after* restoring placeholders
+        text = self._format_code_blocks(text)
 
         # --- End of fixes ---
 
         if self.verbose and text != original_text:
              print("  Applied formatting fixes.") # General message
 
+        # Final cleanup of potentially excessive newlines
+        text = re.sub(r'\n{3,}', '\n\n', text).strip()
+
+        return text
+
+    def _remove_duplicate_title(self, text: str, filename_base: str) -> str:
+        """Removes the first H1 header if it matches the filename."""
+        # Simple case: H1 is the very first line
+        pattern = re.compile(r"^\s*#\s+" + re.escape(filename_base) + r"\s*\n")
+        if pattern.match(text):
+            # Find the end of the first line
+            first_line_end = text.find('\n')
+            if first_line_end != -1:
+                # Check if the next line is blank, remove it too if so
+                if text[first_line_end+1:].startswith('\n'):
+                    return text[first_line_end+2:] # Skip title and blank line
+                else:
+                    return text[first_line_end+1:] # Skip just title line
+            else:
+                return "" # File only contained the title
         return text
 
     def _fix_escaped_latex_delimiters(self, text: str) -> str:
-        """
-        Corrects improperly escaped LaTeX delimiters like \$...\$ to $...$.
-
-        Finds instances of a literal '\$' followed by some content and another
-        literal '\$', and replaces them with '$' followed by the content and '$'.
-        It avoids changing valid LaTeX commands starting with '\'.
-
-        Args:
-            text: The input string potentially containing incorrect LaTeX.
-
-        Returns:
-            The string with corrected LaTeX delimiters.
-        """
+        """Corrects improperly escaped LaTeX delimiters like \$...\$ to $...$."""
         # Pattern: Finds \$ followed by non-$ characters (non-greedy) followed by \$
         # Replacement: Replaces with $ followed by the captured content followed by $
         corrected_text = re.sub(r'\\\$([^$]+?)\\\$', r'$\1$', text)
         return corrected_text
 
+    def _convert_latex_delimiters(self, text: str) -> str:
+        """Converts \(...\) to $...$ and \[...\] to $$...$$."""
+        text = text.replace(r'\(', '$')
+        text = text.replace(r'\)', '$')
+        text = text.replace(r'\[', '$$')
+        text = text.replace(r'\]', '$$')
+        return text
+
     def _fix_math_content(self, text: str) -> str:
-        """
-        Cleans up common issues within $...$ and $$...$$ blocks.
-        Currently fixes escaped underscores: \_ -> _
-        """
+        """Cleans up common issues within $...$ and $$...$$ blocks."""
         def replace_content(match):
-            # Group 1 captures the delimiter ($ or $$)
-            # Group 2 captures the content inside
             delimiter = match.group(1)
             content = match.group(2)
 
-            # Apply fixes to the content
             # Replace escaped underscore with literal underscore
             fixed_content = content.replace(r'\_', '_')
 
-            # Add more content fixes here if needed in the future
-            # fixed_content = fixed_content.replace(r'\*', '*') # Example
+            # Fix wiki links inside math blocks (only for $$ blocks)
+            if delimiter == '$$' and '[[' in fixed_content and ']]' in fixed_content:
+                fixed_content = re.sub(r'\[\[([^\]]+)\]\]', r'\1', fixed_content)
 
-            # Reconstruct the math block
             return delimiter + fixed_content + delimiter
 
-        # Pattern to find math blocks ($...$ or $$...$$)
-        # (\${1,2}): Captures $ or $$ as group 1
-        # (.*?): Non-greedily captures content as group 2
-        # \1: Matches the same delimiter captured in group 1
-        # re.DOTALL allows '.' to match newlines, important for $$...$$ blocks
         pattern = r'(\${1,2})(.*?)\1'
         corrected_text = re.sub(pattern, replace_content, text, flags=re.DOTALL)
-
-        # Optional: Add verbose logging specific to this fix
-        # if self.verbose and corrected_text != text:
-        #     print("    - Applied math content fixes (e.g., escaped underscores).")
-
         return corrected_text
 
+    def _fix_inline_math_spacing(self, text: str) -> str:
+        """Fixes spacing issues around inline $...$ math."""
+        # Remove spaces immediately inside $...$
+        # Handles one or more spaces: $  content  $ -> $content$
+        text = re.sub(r'\$\s*(.*?)\s*\$', r'$\1$', text)
+
+        return text
+
     def _fix_bullet_indentation(self, text: str) -> str:
-        """
-        Converts space-indented second-level bullets to tab-indented.
-        Specifically targets lines starting with '  * '.
-        """
+        """Converts space-indented second-level bullets to tab-indented."""
         # Pattern: Start of line (^), exactly two spaces (  ), literal '* '
         # Replacement: Start of line, a tab (\t), literal '* '
         # re.MULTILINE makes ^ match the start of each line, not just the string
         corrected_text = re.sub(r'^(  )\* ', r'\t* ', text, flags=re.MULTILINE)
-
-        # Optional: Add verbose logging specific to this fix
-        # if self.verbose and corrected_text != text:
-        #     print("    - Applied bullet indentation fix (spaces to tabs).")
-
         return corrected_text
 
-    # --- Add other fix methods below if migrating from fix_math_formatting ---
-    # def _fix_inline_math_spaces(self, text: str) -> str:
-    #     # ... implementation ...
-    #     return text
-    #
-    # def _convert_latex_delimiters(self, text: str) -> str:
-    #     # ... implementation ...
-    #     return text
-    # ... etc ...
+    def _fix_hashtag_brackets(self, text: str) -> str:
+        """Fixes hashtags like #[[tag]], #[tag], #tag-[[subtag]]."""
+        # Handle #[[tag]] or #[tag] -> #tag
+        text = re.sub(r'(#)(\[+)([a-zA-Z0-9\/_-]+)(\]+)', r'\1\3', text)
+        # Handle #tag-[[subtag]] -> #tag-subtag
+        text = re.sub(r'(#[a-zA-Z0-9\/_-]+)-(\[\[)([a-zA-Z0-9\/_-]+)(\]\])', r'\1-\3', text)
+        return text
+
+    def _fix_wiki_links(self, text: str) -> str:
+        """Fixes nested or multiple brackets in wiki links."""
+        # Fix nested links like [[ Link [[Nested]] ]] -> [[ Link Nested ]]
+        nested_pattern = r'\[\[(.*?)\[\[(.*?)\]\](.*?)\]\]'
+        while re.search(nested_pattern, text):
+            text = re.sub(nested_pattern, r'[[\1\2\3]]', text)
+
+        # Fix multiple brackets like [[[Topic]]] -> [[Topic]]
+        # Use {2,} for brackets to catch [[Topic]], {3,} for content inside
+        text = re.sub(r'\[{3,}([^\[\]]+?)\]{3,}', r'[[\1]]', text)
+        return text
+
+    def _remove_simple_link_placeholders(self, text: str) -> str:
+        """Removes __SIMPLE_LINK_<digits>__ placeholders, replacing with '1'."""
+        return re.sub(r'__SIMPLE_LINK_\d+__', r'1', text)
+
+    def _format_math_blocks(self, text: str) -> str:
+        """Ensures $$ math blocks are on their own lines with blank lines around."""
+        # --- Refined Regex for Math Blocks ---
+        # Ensure $$ starts on a new line, preceded by exactly one blank line
+        # Use positive lookbehind (?<=...) to ensure a newline precedes, negative (?<!\n) to ensure no second newline
+        text = re.sub(r'(?<!\n)\n(?!\n)(\$\$)', r'\n\n\1', text) # Add leading blank line if only one newline exists
+        text = re.sub(r'(?<!\n)(\$\$)', r'\n\n\1', text)      # Add leading blank line if no newline exists
+
+        # Ensure $$ ends a line, followed by exactly one blank line
+        # Use positive lookahead (?=...) to ensure a newline follows, negative (?!\n) to ensure no second newline
+        text = re.sub(r'(\$\$)\n(?!\n)', r'\1\n\n', text) # Add trailing blank line if only one newline exists
+        text = re.sub(r'(\$\$)(?!\n)', r'\1\n\n', text)   # Add trailing blank line if no newline exists
+        # --- End Refined Regex ---
+        return text
+
+    def _format_code_blocks(self, text: str) -> str:
+        """Ensures ``` code blocks are on their own lines with blank lines around."""
+        # --- Refined Regex for Code Blocks ---
+        # Ensure ``` starts on a new line, preceded by exactly one blank line
+        text = re.sub(r'(?<!\n)\n(?!\n)(```)', r'\n\n\1', text) # Add leading blank line if only one newline exists
+        text = re.sub(r'(?<!\n)(```)', r'\n\n\1', text)      # Add leading blank line if no newline exists
+
+        # Ensure ``` ends a line, followed by exactly one blank line
+        text = re.sub(r'(```)\n(?!\n)', r'\1\n\n', text) # Add trailing blank line if only one newline exists
+        text = re.sub(r'(```)(?!\n)', r'\1\n\n', text)   # Add trailing blank line if no newline exists
+        # --- End Refined Regex ---
+        return text
 
 def format_command(path=None, dry_run=False, backup=True, verbose=False):
     """Command line entry point for the format fixer"""

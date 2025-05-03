@@ -37,7 +37,7 @@ def format_file(file_path, dry_run=False):
             for i in range(min(len(content_lines), len(modified_lines))):
                 old = content_lines[i]
                 new = modified_lines[i]
-                if old \!= new:
+                if old != new:
                     print(f"- {old}")
                     print(f"+ {new}")
                     # Only show a few examples

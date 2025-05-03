@@ -1,15 +1,11 @@
 import os
 import glob
 import pickle
-import numpy as np
 import logging
 from tqdm import tqdm  # For progress bar
-from typing import Dict, Tuple, Optional, List # Added List
+from typing import Dict, Tuple, Optional, List, Any # <-- Ensure Any is imported
 from pathlib import Path # Import Path
 import time
-from sentence_transformers import SentenceTransformer
-
-# print("DEBUG: Importing obsidian_librarian.utils.indexing...") # Already removed
 
 # Configure logging
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -49,6 +45,11 @@ def index_vault(
         file_map_path: Path to save the .pkl file map.
         model_name: Name of the Sentence Transformer model to use.
     """
+    # --- Import heavy libraries here ---
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
+    # --- End import ---
+
     logger.info(f"Starting vault indexing using DB: {db_path}")
     logger.info(f"Reading files from vault: {vault_path}")
     logger.info(f"Using embedding model: {model_name}")
@@ -62,7 +63,7 @@ def index_vault(
 
         if not files_to_index:
             logger.info("No files found in DB to index. Saving empty index files.")
-            # Save empty files to indicate indexing ran but found nothing
+            # np is used here
             np.save(embeddings_path, np.array([]))
             with open(file_map_path, 'wb') as f:
                 pickle.dump({}, f)
@@ -91,16 +92,19 @@ def index_vault(
 
         if not documents:
              logger.warning("No documents could be read successfully. Saving empty index.")
+             # np is used here
              np.save(embeddings_path, np.array([]))
              with open(file_map_path, 'wb') as f:
                  pickle.dump({}, f)
              return
 
         logger.info(f"Loading sentence transformer model '{model_name}'...")
+        # SentenceTransformer is used here
         model = SentenceTransformer(model_name)
 
         logger.info(f"Generating embeddings for {len(documents)} documents...")
         start_time = time.time()
+        # model.encode uses numpy implicitly
         embeddings = model.encode(documents, show_progress_bar=True)
         end_time = time.time()
         logger.info(f"Embedding generation took {end_time - start_time:.2f} seconds.")
@@ -108,6 +112,7 @@ def index_vault(
 
         # --- Save embeddings and map ---
         logger.info(f"Saving embeddings to {embeddings_path}")
+        # np is used here
         np.save(embeddings_path, embeddings)
 
         # Create mapping from index to relative file path
@@ -122,7 +127,7 @@ def index_vault(
         # Re-raise the exception so the caller knows it failed
         raise
 
-def load_index_data(embeddings_path: str, map_path: str) -> Tuple[Optional[np.ndarray], Optional[dict]]:
+def load_index_data(embeddings_path: str, map_path: str) -> Tuple[Optional[Any], Optional[dict]]: # Changed type hint for numpy
     """
     Loads the embeddings NumPy array and the file map dictionary from disk.
 
@@ -133,12 +138,17 @@ def load_index_data(embeddings_path: str, map_path: str) -> Tuple[Optional[np.nd
     Returns:
         A tuple containing either a NumPy array or None, and either a dictionary or None.
     """
+    # --- Import numpy here ---
+    import numpy as np
+    # --- End import ---
+
     embeddings = None
     file_map = None
 
     if os.path.exists(embeddings_path):
         try:
-            embeddings = np.load(embeddings_path) # Use of np
+            # np is used here
+            embeddings = np.load(embeddings_path)
             logging.info(f"Loaded embeddings from {embeddings_path} (Shape: {embeddings.shape})")
         except Exception as e:
             logging.error(f"Failed to load embeddings file {embeddings_path}: {e}")
@@ -160,13 +170,14 @@ def load_index_data(embeddings_path: str, map_path: str) -> Tuple[Optional[np.nd
         return embeddings, None # Return embeddings but indicate map error
 
     # Sanity check: number of embeddings should match number of files in map
+    # np shape access is used here
     if embeddings is not None and file_map is not None and embeddings.shape[0] != len(file_map):
         logging.warning(f"Mismatch between number of embeddings ({embeddings.shape[0]}) and file map entries ({len(file_map)}). Index might be inconsistent.")
         # Decide how to handle this? For now, proceed but log warning.
 
     return embeddings, file_map
 
-def find_similar_notes(prerequisites: list[str], embeddings: np.ndarray, file_map: dict, model) -> dict:
+def find_similar_notes(prerequisites: list[str], embeddings: Any, file_map: dict, model) -> dict: # Changed type hint for numpy
     """
     Finds the most similar notes in the vault for a given list of prerequisite concepts.
 
@@ -181,22 +192,29 @@ def find_similar_notes(prerequisites: list[str], embeddings: np.ndarray, file_ma
         (best_matching_filepath, similarity_score).
         Returns an empty dict if prerequisites list is empty or embeddings are invalid.
     """
-    from sklearn.metrics.pairwise import cosine_similarity # <-- Keep this lazy import
+    # --- Import heavy libraries here ---
+    import numpy as np
+    from sklearn.metrics.pairwise import cosine_similarity # Already lazy-loaded, but good to keep imports together
+    # SentenceTransformer is passed in as 'model', no need to import it here unless creating a new one.
+    # --- End import ---
+
     results = {}
+    # np shape access is used here
     if not prerequisites or embeddings is None or embeddings.shape[0] == 0 or not file_map:
         logging.warning("Cannot find similar notes: Prerequisites list is empty or index data is invalid/empty.")
         return results
 
     logging.info(f"Generating embeddings for {len(prerequisites)} prerequisites...")
     try:
-        from sentence_transformers import SentenceTransformer # Already lazy-loaded
-        prereq_embeddings = model.encode(prerequisites, convert_to_numpy=True, normalize_embeddings=True) # Uses np implicitly via model
+        # model.encode uses numpy implicitly
+        prereq_embeddings = model.encode(prerequisites, convert_to_numpy=True, normalize_embeddings=True)
     except Exception as e:
         logging.error(f"Failed to generate embeddings for prerequisites: {e}")
         return results
 
     logging.info("Calculating cosine similarities...")
-    sim_matrix = cosine_similarity(prereq_embeddings, embeddings) # Use of cosine_similarity
+    # cosine_similarity uses numpy
+    sim_matrix = cosine_similarity(prereq_embeddings, embeddings)
 
     # For each prerequisite, find the note with the highest similarity
     for i, prereq in enumerate(prerequisites):
@@ -205,7 +223,8 @@ def find_similar_notes(prerequisites: list[str], embeddings: np.ndarray, file_ma
              best_match_index = -1
              max_similarity = 0.0
         else:
-            best_match_index = np.argmax(sim_matrix[i]) # Use of np
+            # np is used here
+            best_match_index = np.argmax(sim_matrix[i])
             max_similarity = sim_matrix[i, best_match_index]
 
         if best_match_index != -1 and best_match_index in file_map:
@@ -217,6 +236,30 @@ def find_similar_notes(prerequisites: list[str], embeddings: np.ndarray, file_ma
             logging.warning(f"Could not find file path for best match index {best_match_index} for prerequisite '{prereq}'")
 
     return results
+
+def extract_frontmatter(metadata: Any) -> Optional[Dict[str, Any]]:
+    """
+    Extracts frontmatter from a metadata object (duck typing).
+
+    Args:
+        metadata: An object expected to have a 'frontmatter' attribute.
+
+    Returns:
+        A dictionary containing the frontmatter, or None if no frontmatter exists
+        or an error occurred (e.g., attribute missing).
+    """
+    # Use hasattr for safer access if the object might not have the attribute
+    if hasattr(metadata, 'frontmatter') and metadata.frontmatter is not None:
+        # Ensure it's a dictionary before returning, or handle other types if necessary
+        if isinstance(metadata.frontmatter, dict):
+             return metadata.frontmatter
+        else:
+             # Log a warning if frontmatter exists but isn't a dict (unexpected)
+             logger.warning(f"Non-dictionary frontmatter found for object: {type(metadata.frontmatter)}")
+             return None # Or return {} or handle as appropriate
+    else:
+        # logger.debug(f"No frontmatter attribute found or it is None for object.")
+        return None
 
 # Example usage (for testing purposes, can be removed later)
 if __name__ == '__main__':

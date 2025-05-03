@@ -13,11 +13,13 @@ from obsidian_librarian.config import (
     update_last_embeddings_build_timestamp
 )
 from obsidian_librarian.utils.indexing import (
-    index_vault,
+    index_vault as build_semantic_index,
     get_default_index_paths,
-    DEFAULT_MODEL as DEFAULT_EMBEDDING_MODEL
+    DEFAULT_MODEL as DEFAULT_EMBEDDING_MODEL,
+    extract_frontmatter,
 )
-from .. import config as vault_config, vault_state
+from obsidian_librarian.utils.formatting import generate_index_content
+from .. import config as vault_config
 
 # Configure logging for the command
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -78,14 +80,14 @@ def build(force):
             update_last_embeddings_build_timestamp()
 
 def _perform_index_build(vault_path: Path, db_path: Path) -> bool:
-    """Internal function to handle the actual index building process."""
+    """Internal function to handle the actual semantic index building process."""
     try:
         config_data = get_config()
         model_name = config_data.get('embedding_model', DEFAULT_EMBEDDING_MODEL)
         config_dir = get_config_dir()
         embeddings_path, file_map_path = get_default_index_paths(config_dir)
 
-        index_vault(
+        build_semantic_index(
             db_path=db_path,
             vault_path=vault_path,
             embeddings_path=embeddings_path,
@@ -94,11 +96,81 @@ def _perform_index_build(vault_path: Path, db_path: Path) -> bool:
         )
         return True
     except Exception as e:
-        click.echo(f"Error during index building: {e}", err=True)
+        click.echo(f"Error during semantic index building: {e}", err=True)
         # Log the full traceback for debugging
         import traceback
         traceback.print_exc()
         return False
+
+def generate_human_readable_index(vault_path: str, output_file: str, use_ai: bool = False):
+    """Generates a human-readable index file of the Obsidian vault."""
+    from ..vault_state import VaultState
+    from ..utils.file_operations import write_file
+    from ..utils.ai import generate_summary
+
+    logger.info(f"Starting human-readable index generation for vault: {vault_path}")
+    vault_state_instance = VaultState(vault_path)
+    index_data = {}
+
+    for file_path, metadata in vault_state_instance.files.items():
+        if not metadata:
+            logger.warning(f"Skipping file due to missing metadata: {file_path}")
+            continue
+
+        relative_path = metadata.relative_path
+        logger.debug(f"Processing file for human index: {relative_path}")
+
+        frontmatter = extract_frontmatter(metadata)
+
+        summary = None
+        if use_ai and metadata.content:
+            logger.debug(f"Generating AI summary for: {relative_path}")
+            try:
+                summary = generate_summary(metadata.content)
+            except Exception as e:
+                logger.error(f"Failed to generate AI summary for {relative_path}: {e}")
+
+        index_data[relative_path] = {
+            "path": relative_path,
+            "title": metadata.title,
+            "frontmatter": frontmatter if frontmatter else {},
+            "summary": summary,
+            "tags": metadata.tags,
+            "links": list(metadata.links),
+            "backlinks": list(metadata.backlinks),
+        }
+
+    index_content = generate_index_content(index_data)
+
+    if write_file(output_file, index_content):
+        logger.info(f"Human-readable index file generated successfully: {output_file}")
+    else:
+        logger.error(f"Failed to write human-readable index file: {output_file}")
+
+@index.command(name="create-md")
+@click.option('--vault-path', default=None, help='Path to the Obsidian vault (overrides config).')
+@click.option('--output', '-o', default='vault_index.md', help='Output file path for the index.')
+@click.option('--ai', is_flag=True, help='Use AI to generate summaries for notes.')
+def create_markdown_index(vault_path, output, ai):
+    """Generate a human-readable Markdown index file for the vault."""
+    if vault_path is None:
+        vault_path_config = get_vault_path_from_config()
+        if not vault_path_config:
+            click.echo("Vault path not configured. Run 'olib config setup' or use --vault-path.", err=True)
+            return
+        vault_path = vault_path_config
+
+    if not os.path.isdir(vault_path):
+        click.echo(f"Error: Vault path '{vault_path}' not found or is not a directory.", err=True)
+        return
+
+    try:
+        generate_human_readable_index(vault_path, output, ai)
+        click.echo(f"Markdown index generated at: {output}")
+    except Exception as e:
+        click.echo(f"Error generating Markdown index: {e}", err=True)
+        import traceback
+        traceback.print_exc()
 
 # Add other index commands if needed (e.g., status, clear)
 # index.add_command(status) 

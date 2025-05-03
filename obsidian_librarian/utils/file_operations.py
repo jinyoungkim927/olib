@@ -225,49 +225,56 @@ def find_note_in_vault(vault_path: str, note_identifier: str) -> Optional[Path]:
 # --- Add function to find popular tags ---
 def get_popular_tags(vault_path: str, min_count: int = 5) -> List[str]:
     """
-    Scans markdown files in the vault to find tags used more than min_count times.
+    Finds tags that appear frequently across notes in the vault.
 
     Args:
         vault_path: The absolute path to the Obsidian vault.
-        min_count: The minimum number of times a tag must appear to be included.
+        min_count: The minimum number of times a tag must appear to be considered popular.
 
     Returns:
         A list of popular tag names (without the '#').
     """
-    logger.info(f"Scanning vault for popular tags (min count: {min_count})...")
+    tag_counts = get_all_tag_counts(vault_path) # Use the new function
+    popular_tags = [tag for tag, count in tag_counts.items() if count >= min_count]
+    logger.info(f"Found {len(popular_tags)} tags appearing at least {min_count} times.")
+    return popular_tags
+
+def get_all_tag_counts(vault_path: str) -> Dict[str, int]:
+    """
+    Counts occurrences of all tags across all markdown notes in the vault.
+    Looks for tags within the first ~5 lines or ~100 characters.
+
+    Args:
+        vault_path: The absolute path to the Obsidian vault.
+
+    Returns:
+        A dictionary mapping tag names (without '#') to their counts.
+    """
+    tag_counts = {}
     vault_path_obj = Path(vault_path)
-    if not vault_path_obj.is_dir():
-        logger.error(f"Vault path does not exist or is not a directory: {vault_path}")
-        return []
+    md_files = list(vault_path_obj.rglob("*.md"))
+    # Regex to find hashtags: starts with #, followed by one or more alphanumeric, /, -, _
+    # It avoids matching things like #123 or #---
+    tag_regex = re.compile(r'#([a-zA-Z0-9][a-zA-Z0-9\/_-]*)')
 
-    tag_counter = Counter()
-    # Regex to find tags: # followed by alphanumeric or _ / -
-    # Avoids matching tags within code blocks or URLs potentially
-    tag_regex = re.compile(r'(?<![/#])#([a-zA-Z0-9_\-\/]+)')
+    for file_path in md_files:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                # Read the first few lines or characters to optimize
+                content_start = ""
+                for i, line in enumerate(f):
+                    content_start += line
+                    if i >= 4 or len(content_start) > 150: # Check first 5 lines or ~150 chars
+                        break
 
-    try:
-        md_files = vault_path_obj.rglob('*.md')
-        total_files = 0
-        for file_path in md_files:
-            total_files += 1
-            try:
-                # Basic check to skip potential code blocks - not perfect
-                content = read_note_content(file_path)
-                if content:
-                     # Find all tags in the content
-                     # A more robust solution might parse frontmatter separately
-                     found_tags = tag_regex.findall(content)
-                     # Normalize tags (lowercase, remove leading/trailing slashes if any)
-                     normalized_tags = [tag.lower().strip('/') for tag in found_tags]
-                     tag_counter.update(normalized_tags)
-            except Exception as e:
-                logger.warning(f"Could not read or parse tags from {file_path.name}: {e}")
+                # Find all tags in the beginning part
+                found_tags = tag_regex.findall(content_start)
+                for tag in found_tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        except Exception as e:
+            logger.warning(f"Could not read or parse tags from {file_path.name}: {e}")
 
-        popular_tags = [tag for tag, count in tag_counter.items() if count >= min_count]
-        logger.info(f"Scan complete. Found {len(popular_tags)} popular tags from {total_files} files.")
-        return sorted(popular_tags)
+    logger.info(f"Counted {len(tag_counts)} unique tags across {len(md_files)} notes.")
+    return tag_counts
 
-    except Exception as e:
-        logger.error(f"Error scanning vault for tags: {e}", exc_info=True)
-        return []
 # --- End function ---

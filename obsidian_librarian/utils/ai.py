@@ -85,7 +85,7 @@ def get_prerequisites_from_llm(note_content: str, model_name: str = DEFAULT_LLM_
     if not client:
         return None
 
-    prompt = f"""Analyze the following text. Identify the top 3-5 essential prerequisite concepts required for a deep understanding. Focus on foundational ideas assumed by the text. Output ONLY a JSON list of strings, like ["Concept Name 1", "Concept Name 2", "Concept Name 3"].
+    prompt = f"""Analyze the following text. Identify the top 3-5 essential prerequisite concepts required for a deep understanding. Focus on foundational or core ideas assumed by the text. Output ONLY a JSON list of strings, like ["Concept Name 1", "Concept Name 2", "Concept Name 3"].
 
 TEXT:
 ---

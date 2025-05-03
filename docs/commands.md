@@ -21,6 +21,7 @@ olib notes autolink --dry-run
 ```
 
 Features:
+
 - Preserves existing links
 - Handles case insensitivity
 - Ignores LaTeX math expressions between $ or $$ delimiters
@@ -50,6 +51,7 @@ olib notes check-garbage --min-size 20 --max-size 100000
 ⚠️ Important: Use `--all` with two dashes, not `all` as a positional argument.
 
 Features:
+
 - Identifies empty or very small files
 - Finds excessively large files
 - Detects case-insensitive duplicate titles
@@ -67,6 +69,7 @@ olib notes ocr "Note Title"
 ```
 
 Features:
+
 - Finds all image references in the `![[image]]` format
 - Processes each image with OCR
 - Adds the extracted text right after the image reference
