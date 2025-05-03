@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import sys
+from datetime import datetime
 
 # Import config functions
 from .config import get_config_dir, get_vault_path_from_config
@@ -80,96 +81,142 @@ def _calculate_hash(filepath: Path) -> str:
         print(f"Error hashing file {filepath}: {e}")
         return ""
 
-def update_vault_scan(vault_path: Path, db_path: Path = DB_PATH, quiet: bool = False) -> bool:
-    """Scans the vault, updates the database. Returns True on success."""
+def update_vault_scan(vault_path: Path, db_path: Path = DB_PATH, quiet: bool = False, full_scan: bool = True) -> Tuple[bool, int, int]:
+    """
+    Scans the vault, updates the database.
+
+    Args:
+        vault_path: Path to the Obsidian vault.
+        db_path: Path to the SQLite database file.
+        quiet: If True, suppress console output.
+        full_scan: If True, performs a full scan detecting additions, modifications,
+                   and deletions. If False, performs an incremental scan checking only
+                   for files modified since the last known max modification time in the DB,
+                   plus an efficient deletion check.
+
+    Returns:
+        Tuple[bool, int, int]: (success, added_count, modified_count)
+                               Counts reflect changes detected *during this specific scan*.
+                               Deletion counts are logged but not returned directly here.
+    """
     conn = None
     changes_made = False
+    # Reset counts for this specific scan run
     added_count, modified_count, deleted_count = 0, 0, 0
-    current_files = {} # Store {relative_path_str: {'mtime': ..., 'size': ...}}
+    processed_during_scan = {}
+    scan_start_time = time.time()
 
     try:
         conn = get_db_connection(db_path)
         cursor = conn.cursor()
 
-        # Get existing files from DB to compare
-        # --- FIX: Use correct column name 'mtime' ---
         cursor.execute("SELECT path, mtime, size FROM files WHERE status = 'current'")
-        # --- End Fix ---
         db_files = {row['path']: {'mtime': row['mtime'], 'size': row['size']} for row in cursor.fetchall()}
+        db_paths_before_scan = set(db_files.keys())
 
-        if not quiet:
-            print(f"Scanning vault: {vault_path}...")
+        scan_since_mtime = 0.0
+        if not full_scan:
+            max_mtime_result = cursor.execute("SELECT MAX(mtime) FROM files WHERE status = 'current'").fetchone()
+            if max_mtime_result and max_mtime_result[0] is not None:
+                scan_since_mtime = max_mtime_result[0]
+            # Output message only if not quiet
+            if not quiet:
+                 last_scan_dt = datetime.fromtimestamp(scan_since_mtime).strftime('%Y-%m-%d %H:%M:%S') if scan_since_mtime > 0 else "beginning"
+                 print(f"Performing incremental scan for files modified since {last_scan_dt}...")
+        elif not quiet:
+            print(f"Performing full scan of vault: {vault_path}...")
 
         if not vault_path.is_dir():
              if not quiet: print(f"Error: Vault path '{vault_path}' not found during scan.")
-             return False
+             # Return failure and zero counts
+             return False, 0, 0
 
         # --- Scan filesystem ---
-        for item in vault_path.rglob('*'): # Use rglob for recursive scan
+        for item in vault_path.rglob('*'):
             if item.is_file() and item.suffix.lower() == '.md':
                 try:
+                    stats = item.stat()
+                    if not full_scan and stats.st_mtime <= scan_since_mtime:
+                        continue
                     rel_path = item.relative_to(vault_path)
                     rel_path_str = str(rel_path)
-                    stats = item.stat()
-                    current_files[rel_path_str] = {'mtime': stats.st_mtime, 'size': stats.st_size}
+                    processed_during_scan[rel_path_str] = {'mtime': stats.st_mtime, 'size': stats.st_size}
                 except Exception as e:
                      if not quiet: print(f"Warning: Could not process file {item}: {e}")
 
 
-        # --- Process scanned files (compare with db_files) ---
-        # (Logic for adding/updating files remains the same, using 'mtime' and 'size')
-        for rel_path_str, file_info in current_files.items():
+        # --- Process scanned files (Additions/Modifications) ---
+        for rel_path_str, file_info in processed_during_scan.items():
             db_entry = db_files.get(rel_path_str)
             if db_entry is None:
-                # New file
-                # ... (logging) ...
+                # New file - Increment added_count
+                if not quiet: logger.debug(f"Adding new file: {rel_path_str}")
                 cursor.execute(
                     "INSERT OR REPLACE INTO files (path, mtime, size, status) VALUES (?, ?, ?, ?)",
                     (rel_path_str, file_info['mtime'], file_info['size'], 'current')
                 )
-                added_count += 1
+                added_count += 1 # <-- Count added file
                 changes_made = True
             elif file_info['mtime'] > db_entry['mtime'] or file_info['size'] != db_entry['size']:
-                # Modified file
-                # ... (logging) ...
+                # Modified file - Increment modified_count
+                if not quiet: logger.debug(f"Updating modified file: {rel_path_str}")
                 cursor.execute(
                     "UPDATE files SET mtime = ?, size = ? WHERE path = ?",
                     (file_info['mtime'], file_info['size'], rel_path_str)
                 )
-                modified_count += 1
+                modified_count += 1 # <-- Count modified file
                 changes_made = True
-            # Remove processed file from db_files dict
-            db_files.pop(rel_path_str, None)
 
+        # --- Deletion Check ---
+        if full_scan:
+            files_found_in_full_scan = set(processed_during_scan.keys())
+            deleted_paths = db_paths_before_scan - files_found_in_full_scan
+            for rel_path_str in deleted_paths:
+                if not quiet: logger.debug(f"[Full Scan] Marking deleted file: {rel_path_str}")
+                cursor.execute("UPDATE files SET status = 'deleted' WHERE path = ?", (rel_path_str,))
+                deleted_count += 1
+                changes_made = True
+        else:
+            # Incremental scan deletion check
+            paths_to_check_existence = db_paths_before_scan - set(processed_during_scan.keys())
+            existence_check_start_time = time.time() # Perf timing
+            for rel_path_str in paths_to_check_existence:
+                abs_path = vault_path / rel_path_str
+                if not abs_path.exists():
+                    if not quiet: logger.debug(f"[Incremental Scan] Marking deleted file: {rel_path_str}")
+                    cursor.execute("UPDATE files SET status = 'deleted' WHERE path = ?", (rel_path_str,))
+                    deleted_count += 1
+                    changes_made = True
+            existence_check_duration = time.time() - existence_check_start_time
+            logger.debug(f"Incremental deletion check duration: {existence_check_duration:.4f} seconds for {len(paths_to_check_existence)} files")
 
-        # --- Mark deleted files ---
-        # (Logic remains the same)
-        for rel_path_str in db_files: # Files remaining in db_files were not found in scan
-            # ... (logging) ...
-            cursor.execute("UPDATE files SET status = 'deleted' WHERE path = ?", (rel_path_str,))
-            deleted_count += 1
-            changes_made = True
 
         # --- Commit and report ---
         if changes_made:
             conn.commit()
+            # Report includes deleted_count, but it's not returned directly
             if not quiet:
                  summary = []
                  if added_count: summary.append(f"{added_count} added")
                  if modified_count: summary.append(f"{modified_count} modified")
                  if deleted_count: summary.append(f"{deleted_count} deleted")
-                 print(f"Vault scan complete. Changes: {', '.join(summary)}.")
+                 scan_type = "Full scan" if full_scan else "Incremental scan"
+                 print(f"{scan_type} complete. Changes: {', '.join(summary) if summary else 'None'}.")
         elif not quiet:
-            print("Vault scan complete. No changes detected.")
+            scan_type = "Full scan" if full_scan else "Incremental scan"
+            print(f"{scan_type} complete. No changes detected.")
 
-        return True # Indicate success
+        scan_duration = time.time() - scan_start_time
+        logger.debug(f"Vault scan duration ({'full' if full_scan else 'incremental'}): {scan_duration:.2f} seconds. Added: {added_count}, Modified: {modified_count}, Deleted: {deleted_count}")
+
+        # Return success and the counts of added/modified files
+        return True, added_count, modified_count
 
     except sqlite3.Error as e:
-        # Log the specific error, including the failed query if possible
         logger.error(f"Database error during scan: {e}")
-        # Optionally print to stderr as well for immediate visibility during tests
         print(f"Database error during scan: {e}", file=sys.stderr)
-        return False # Indicate failure
+        # Return failure and zero counts
+        return False, 0, 0
     finally:
         if conn:
             conn.close()
@@ -254,25 +301,26 @@ def get_file_details(relative_filepath: str, db_path: Path = DB_PATH) -> Optiona
      conn.close()
      return row 
 
-def get_max_mtime_from_db(db_path=DB_PATH):
-    """Gets the maximum modification time recorded in the database."""
+def get_max_mtime_from_db(db_path=DB_PATH) -> Optional[float]: # Return Optional[float]
+    """Gets the maximum modification time recorded in the database for 'current' files."""
     max_mtime = None
     try:
+        # Ensure DB exists before connecting, or handle error gracefully
+        if not Path(db_path).exists():
+             logger.warning(f"Database file not found at {db_path}, cannot get max mtime.")
+             return None
+
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        # --- FIX: Query specifically from the 'files' table ---
         cursor.execute("SELECT MAX(mtime) FROM files WHERE status = 'current'")
-        # --- End Fix ---
         result = cursor.fetchone()
         if result and result[0] is not None:
             max_mtime = result[0]
         conn.close()
-        # print(f"DEBUG: Max mtime from DB: {max_mtime}") # Optional debug
+        # logger.debug(f"Max mtime from DB: {max_mtime}") # Optional debug
     except sqlite3.Error as e:
-        # Log the error, including the specific table name if relevant
         logger.error(f"Database error querying max mtime from 'files' table: {e}")
-        # Return None or 0.0 depending on how you want to handle DB errors
-        max_mtime = None # Keep returning None on error
+        max_mtime = None # Return None on error
     return max_mtime
 
 def get_last_scan_time(db_path: str) -> float:

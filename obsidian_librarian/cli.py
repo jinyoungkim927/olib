@@ -36,13 +36,18 @@ from .utils.indexing import DEFAULT_MODEL as DEFAULT_EMBEDDING_MODEL # <-- Impor
 from .commands.index import _perform_index_build
 # --- End import ---
 
+# Define the threshold for triggering embedding updates
+MIN_CHANGES_FOR_EMBEDDING = 1 # e.g., 1 means any added or modified file triggers check
+
 # Commands that should NOT trigger *any* auto-updates (history or embeddings)
-COMMANDS_TO_SKIP_UPDATES = ['config', 'index', 'init', 'analytics'] # Add 'analytics'
+# Keep 'index' here so 'olib index build' uses the full scan logic within its own command
+COMMANDS_TO_SKIP_AUTO_SCAN = ['config', 'index', 'init', 'analytics', 'history', 'undo'] # Fine-tune as needed
 
 # --- Configure Root Logger Early ---
 # Set the root logger level to WARNING to suppress INFO messages from libraries like NumExpr
 # You can adjust the level (e.g., ERROR) or format as needed.
 logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__) # Get the logger for this module
 # Optional: Set NumExpr threads to potentially silence its specific info message
 # os.environ['NUMEXPR_MAX_THREADS'] = '8' # Or another number based on your cores
 
@@ -55,76 +60,90 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 @click.pass_context
 def cli(ctx, **kwargs):
     """Obsidian Librarian: Manage and enhance your Obsidian vault."""
-    # Basic context setup if needed
     ctx.ensure_object(dict)
+    db_path_str = str(vault_state.DB_PATH) # Get DB path string once
 
-    # Check if config needs setup before running any command (except init/config)
-    ctx = click.get_current_context()
+    # Config check
     if ctx.invoked_subcommand not in ['init', 'config']:
         config_dir = get_config_dir()
         if not os.path.exists(os.path.join(config_dir, "config.json")):
-             click.echo("Configuration not found.")
-             # Optionally run setup automatically or prompt user
-             # For now, just inform and exit or let subsequent commands fail
-             # if not setup_initial_config(): # Example auto-setup
-             #     return # Exit if setup fails/is cancelled
+             click.echo("Configuration not found. Run 'olib config setup' or 'olib init'.")
+             # Decide if you want to exit or let commands fail
+             # return # Example: exit if config is missing
 
-    # --- Auto-update checks moved here, before command execution ---
-    if ctx.invoked_subcommand not in COMMANDS_TO_SKIP_UPDATES:
-        # 1. Check and update file history DB (vault_state)
-        db_updated, db_path = _check_and_run_auto_update() # Modified to return db_path
+    # --- Automatic INCREMENTAL Scan Check ---
+    scan_success = False
+    added_count = 0
+    modified_count = 0
+    if ctx.invoked_subcommand not in COMMANDS_TO_SKIP_AUTO_SCAN:
+        scan_success, added_count, modified_count = _check_and_run_auto_update()
 
-        # 2. Check and update embeddings index if necessary
-        if db_path: # Only proceed if vault path and db path are valid
-            # --- Pass db_path correctly ---
-            _check_and_run_embedding_update(db_path)
-            # --- End passing db_path ---
-    # --- End auto-update checks ---
+    # --- Conditionally Check for Embedding Update ---
+    # Only proceed if the scan was successful and changes meet the threshold
+    if scan_success and (added_count + modified_count >= MIN_CHANGES_FOR_EMBEDDING):
+        logger.info(f"Significant changes detected (added: {added_count}, modified: {modified_count}). Checking if embedding update is needed.")
+        # This function now only checks timestamps and runs the build if needed
+        _check_and_run_embedding_update(db_path_str)
+    elif ctx.invoked_subcommand not in COMMANDS_TO_SKIP_AUTO_SCAN:
+         # Log if scan ran but didn't meet threshold (optional)
+         logger.debug(f"Scan complete (added: {added_count}, modified: {modified_count}). Change threshold ({MIN_CHANGES_FOR_EMBEDDING}) not met for embedding update check.")
 
-# --- Modify this function to return db_path ---
-def _check_and_run_auto_update() -> Tuple[bool, Optional[str]]:
-    """Checks if auto-update is due and runs the vault scan."""
+# --- Modify this function to return scan results ---
+def _check_and_run_auto_update() -> Tuple[bool, int, int]:
+    """
+    Checks if auto-update is due and runs an INCREMENTAL vault scan.
+    Returns:
+        Tuple[bool, int, int]: (scan_success, added_count, modified_count)
+    """
     settings = get_auto_update_settings()
-    vault_path = get_vault_path_from_config()
-    db_path = vault_state.DB_PATH # Use the constant
+    vault_path_config = get_vault_path_from_config()
+    db_path = vault_state.DB_PATH
+    vault_path = Path(vault_path_config) if vault_path_config else None
+
+    # Default return values
+    scan_success, added_count, modified_count = False, 0, 0
 
     if not vault_path:
-        # Vault path not set, cannot auto-update
-        # click.echo("Auto-update skipped: Vault path not configured.", err=True) # Optional message
-        return False, None
+        logger.debug("Auto-update skipped: Vault path not configured.")
+        return scan_success, added_count, modified_count
 
     if not settings['enabled']:
-        # click.echo("Auto-update disabled.") # Optional message
-        # Still return db_path as it might be needed for embedding check later
-        return False, db_path
+        logger.debug("Auto-update disabled.")
+        # Return success=True here, as disabling isn't a failure, but counts are 0
+        return True, added_count, modified_count
 
     last_scan = settings['last_scan_timestamp']
     interval = settings['interval_seconds']
     now = time.time()
 
     if now - last_scan > interval:
-        click.echo("Auto-update interval elapsed, checking for vault changes...")
+        logger.info("Auto-update interval elapsed, running incremental scan...")
         try:
             vault_state.initialize_database(db_path)
-            # Run scan quietly
-            success = vault_state.update_vault_scan(vault_path, db_path, quiet=True)
-            if success:
-                update_last_scan_timestamp() # Update timestamp only on success
-                click.echo("Vault scan complete.")
-                return True, db_path
+            # Run INCREMENTAL scan quietly and get results
+            scan_success, added_count, modified_count = vault_state.update_vault_scan(
+                vault_path, db_path, quiet=True, full_scan=False
+            )
+            if scan_success:
+                update_last_scan_timestamp()
+                logger.info(f"Incremental vault scan complete (Added: {added_count}, Modified: {modified_count}).")
             else:
-                click.secho("Auto-update vault scan failed.", fg="red")
-                return False, db_path # Return db_path even on failure
+                logger.error("Auto-update incremental vault scan failed.")
         except Exception as e:
-            click.secho(f"An error occurred during auto-update scan: {e}", fg="red", err=True)
-            return False, db_path # Return db_path even on failure
+            logger.error(f"An error occurred during auto-update incremental scan: {e}", exc_info=True)
+            scan_success = False # Ensure failure is marked
+            added_count = 0 # Reset counts on error
+            modified_count = 0
     else:
-        # Interval not elapsed
-        return False, db_path # Return db_path
+        logger.debug("Auto-update interval not elapsed.")
+        scan_success = True # No scan needed is not a failure
 
-# --- Add this new function ---
-def _check_and_run_embedding_update(db_path: str): # <-- Accept db_path as string
-    """Checks if embeddings index needs rebuilding and triggers it."""
+    return scan_success, added_count, modified_count
+
+# --- This function now checks timestamps and runs build if needed ---
+# It's called conditionally by the main cli function based on scan results.
+def _check_and_run_embedding_update(db_path: str):
+    """Checks vault mtime vs last build time and triggers index build if needed."""
     config_dir = get_config_dir()
     vault_path_config = get_vault_path_from_config() # Assume vault_path is valid if db_path is
 
@@ -171,7 +190,6 @@ def _check_and_run_embedding_update(db_path: str): # <-- Accept db_path as strin
         # Catch broad exceptions to prevent crashing the main command
         click.secho(f"Error during automatic embedding index check/update: {e}", fg="red", err=True)
         logging.exception("Embedding update check failed")
-# --- End of new function ---
 
 # Add command groups
 cli.add_command(format.format_notes, name="format")
