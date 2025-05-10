@@ -26,7 +26,7 @@ def process_image_with_gpt4v(image_path, note_name):
         raise ImportError("Required libraries 'requests' and 'openai' not found. Install with 'pip install requests openai'")
 
     config = get_config()
-    api_key = config.get('openai_api_key')
+    api_key = config.get('api_key')
     if not api_key:
         raise ValueError("OpenAI API key not found in config. Run 'olib config setup'.")
 
