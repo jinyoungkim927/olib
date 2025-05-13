@@ -18,9 +18,9 @@ def encode_image(image_path):
 
 def process_image_with_gpt4v(image_path, note_name):
     """Process an image using GPT-4 Vision and return the text description."""
-    # Import requests and openai only when processing an image
+    # Import openai only when processing an image
     try:
-        import requests
+        # import requests # This import is not used for OpenAI client calls
         from openai import OpenAI
     except ImportError:
         raise ImportError("Required libraries 'requests' and 'openai' not found. Install with 'pip install requests openai'")
@@ -32,11 +32,6 @@ def process_image_with_gpt4v(image_path, note_name):
 
     client = OpenAI(api_key=api_key)
     base64_image = encode_image(image_path)
-
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
 
     # Load the OCR prompt from the prompt file
     prompt_path = Path(__file__).parent.parent / "prompts" / "ocr_prompt.txt"
@@ -76,6 +71,7 @@ def process_image_with_gpt4v(image_path, note_name):
         )
     except Exception as e:
         # If gpt-4o fails, try to fall back to vision-preview
+        click.echo(f"gpt-4o failed with {e}, trying gpt-4-vision-preview...") # Optional: inform user of fallback
         response = client.chat.completions.create(
             model="gpt-4-vision-preview",
             messages=[
@@ -100,10 +96,9 @@ def process_image_with_gpt4v(image_path, note_name):
             temperature=0.5
         )
 
-    if response.status_code == 200:
-        return response.choices[0].message.content
-    else:
-        raise Exception(f"OpenAI API Error: {response.status_code} - {response.text}")
+    # If the API call was successful, response will contain the data.
+    # Exceptions are raised for API errors by the openai library itself.
+    return response.choices[0].message.content
 
 def get_all_note_titles(vault_path):
     """Get all note titles in the vault (without .md extension)"""

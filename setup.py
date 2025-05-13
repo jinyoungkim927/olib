@@ -20,7 +20,7 @@ install_requires = [
     'nbformat>=5.0',
     'plotext>=5.0',
     'GitPython>=3.0',
-    'seaborn>=0.11'
+    'seaborn>=0.11',
 ]
 
 # Optional: Keep dev dependencies separate if desired

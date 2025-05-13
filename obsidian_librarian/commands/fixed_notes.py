@@ -15,40 +15,76 @@ def encode_image(image_path):
         return base64.b64encode(image_file.read()).decode('utf-8')
 
 def process_image_with_gpt4v(image_path, note_name):
-    api_key = os.getenv("OPENAI_API_KEY")
+    config = get_config()
+    api_key = config.get('api_key')
     if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable not set")
+        raise ValueError("OpenAI API key not found in config. Run 'olib config setup'.")
 
     base64_image = encode_image(image_path)
     
-    client = OpenAI()
+    client = OpenAI(api_key=api_key)
     
-    response = client.chat.completions.create(
-        model="gpt-4.5-preview", # This model is not available in the API
-        # model="gpt-4o",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Please write detailed notes about {note_name}. Transcribe the content from the image faithfully, and then organize that information in an appropriate way. Format the response in markdown."
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}",
-                            "detail": "high"
-                        }
-                    }
-                ]
-            }
-        ],
-        max_tokens=8192,
-        temperature=0.5
-    )
+    model_to_use = "gpt-4o"
 
-    return response.choices[0].message.content
+    ocr_prompt = f"Please write detailed notes about {note_name}. Transcribe the content from the image faithfully, and then organize that information in an appropriate way. Format the response in markdown."
+
+    try:
+        response = client.chat.completions.create(
+            model=model_to_use,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": ocr_prompt
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=8192,
+            temperature=0.5
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        click.echo(f"Error calling OpenAI API with {model_to_use}: {e}")
+        if model_to_use == "gpt-4o":
+            click.echo("Trying fallback to gpt-4-vision-preview...")
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-4-vision-preview",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": ocr_prompt
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{base64_image}",
+                                        "detail": "high"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens=8192,
+                    temperature=0.5
+                )
+                return response.choices[0].message.content
+            except Exception as fallback_e:
+                raise Exception(f"OpenAI API Error after fallback: {fallback_e}")
+        raise Exception(f"OpenAI API Error: {e}")
 
 def get_all_note_titles(vault_path):
     """Get all note titles in the vault (without .md extension)"""
