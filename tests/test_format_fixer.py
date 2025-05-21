@@ -5,7 +5,7 @@ Test script to verify the format fixer
 import os
 import sys
 # Import from the utility module
-from obsidian_librarian.commands.utilities.format_fixer import FormatFixer
+from obsidian_librarian.commands.utilities.simplified_format_fixer import FormatFixer
 
 # Test content with formatting issues
 test_content = r"""# Test Format File \h

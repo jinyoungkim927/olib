@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import pytest
 # Import from the utility module
-from obsidian_librarian.commands.utilities.format_fixer import FormatFixer
+from obsidian_librarian.commands.utilities.simplified_format_fixer import FormatFixer
 
 # Test content
 test_content = """# Test Format File

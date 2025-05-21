@@ -1,5 +1,5 @@
 """
-Tests for the consolidated formatter.
+Tests for the simplified formatter.
 """
 
 import pytest
@@ -10,7 +10,7 @@ import tempfile
 import shutil
 
 from obsidian_librarian.commands.utilities.format_fixer import FormatFixer
-from obsidian_librarian.utils.post_process_formatting import clean_raw_llm_output as clean_llm_output, post_process_ocr_output as process_ocr_output
+from obsidian_librarian.utils.post_process_formatting import clean_llm_output, process_ocr_output
 from obsidian_librarian.utils.latex_formatting import fix_math_content
 
 

@@ -3,7 +3,7 @@ import os
 import shutil
 from obsidian_librarian.config import get_config
 # --- FIX: Import the class ---
-from obsidian_librarian.commands.utilities.format_fixer import FormatFixer
+from obsidian_librarian.commands.utilities.simplified_format_fixer import FormatFixer
 # --- End Fix ---
 
 # Create test content

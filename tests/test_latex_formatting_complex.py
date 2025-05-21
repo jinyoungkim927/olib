@@ -21,7 +21,7 @@ from obsidian_librarian.utils.latex_formatting import (
     protect_code_blocks,
     protect_and_extract_math
 )
-from obsidian_librarian.commands.utilities.format_fixer import FormatFixer
+from obsidian_librarian.commands.utilities.simplified_format_fixer import FormatFixer
 
 
 class TestLaTeXFormattingComplex(unittest.TestCase):

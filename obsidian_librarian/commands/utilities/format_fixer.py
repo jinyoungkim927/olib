@@ -21,6 +21,7 @@ from obsidian_librarian.utils.latex_formatting import (
     format_inline_math_spacing,
     format_display_math_blocks
 )
+from obsidian_librarian.utils.compact_math import compact_math_blocks
 
 
 class FormatFixer:
@@ -182,168 +183,81 @@ class FormatFixer:
             print(f"Warning: Could not save history file: {e}")
     
     def apply_all_fixes(self, text: str, filename_base: Optional[str] = None) -> str:
-        """
-        Apply all formatting fixes to the text.
-        
-        Args:
-            text: The raw text content to format
-            filename_base: Optional filename without extension for title check
-            
-        Returns:
-            The formatted text
-        """
-        original_text = text
-        
-        # --- Phase 1: Protect special content ---
-        
-        # Protect code blocks from changes
+        """Apply formatting fixes to the text."""
+        # 1. Protect code blocks
         text, code_blocks = protect_code_blocks(text)
         
-        # Fix malformed math delimiters before extracting math
-        text = self._fix_malformed_math_delimiters(text)
-        
-        # Protect and extract math blocks for special handling
-        text, display_math_blocks, inline_math_blocks = protect_and_extract_math(text)
-        
-        # --- Phase 2: Apply general formatting fixes ---
-        
-        # Remove duplicate title if it matches filename
-        if filename_base:
-            text = self._remove_duplicate_title(text, filename_base)
-        
-        # Fix LaTeX delimiters (\$...\$ -> $...$, \(...\) -> $...$, \[...\] -> $$...$$)
+        # 2. Fix common issues with math delimiters
         text = fix_latex_delimiters(text)
         
-        # Fix bullet point indentation
-        text = self._fix_bullet_indentation(text)
+        # 3. Extract math blocks for protection
+        text, display_math, inline_math = protect_and_extract_math(text)
         
-        # Fix hashtag brackets (#[[tag]] -> #tag)
-        text = self._fix_hashtag_brackets(text)
-        
-        # Fix malformed wiki links
+        # 4. Fix wiki link issues
         text = self._fix_wiki_links(text)
         
-        # Remove simple link placeholders
+        # 5. Fix hashtags with brackets
+        text = self._fix_hashtag_brackets(text)
+        
+        # 6. Remove simple link placeholders
         text = self._remove_simple_link_placeholders(text)
         
-        # Standardize bullet points
-        text = re.sub(r'^\s*\*\s+', '- ', text, flags=re.MULTILINE)
-        
-        # --- Phase 3: Process math content ---
-        
-        # Process each display math block
-        display_math_fixed = {}
-        for placeholder, math_block in display_math_blocks.items():
-            # Extract content between $$ delimiters
-            content = re.match(r'\$\$(.*?)\$\$', math_block, re.DOTALL).group(1)
+        # 7. Process math content
+        for placeholder, math_block in inline_math.items():
+            content = math_block.strip('$')
+            fixed_content = fix_math_content(content)
+            text = text.replace(placeholder, f"${fixed_content}$")
             
-            # Fix the math content
+        for placeholder, math_block in display_math.items():
+            content = math_block.strip('$')
             fixed_content = fix_math_content(content, is_display_math=True)
-            
-            # Reconstruct the math block
-            display_math_fixed[placeholder] = f"$${fixed_content}$$"
+            text = text.replace(placeholder, f"$${fixed_content}$$")
         
-        # Process each inline math block
-        inline_math_fixed = {}
-        for placeholder, math_block in inline_math_blocks.items():
-            # Extract content between $ delimiters
-            content = re.match(r'\$(.*?)\$', math_block).group(1)
-            
-            # Fix the math content
-            fixed_content = fix_math_content(content, is_display_math=False)
-            
-            # Reconstruct the math block
-            inline_math_fixed[placeholder] = f"${fixed_content}$"
-        
-        # --- Phase 4: Restore and format math blocks ---
-        
-        # Restore display math blocks first
-        for placeholder, fixed_block in display_math_fixed.items():
-            text = text.replace(placeholder, fixed_block)
-        
-        # Format display math blocks (ensure proper line breaks)
-        text = format_display_math_blocks(text)
-        
-        # Restore inline math blocks
-        for placeholder, fixed_block in inline_math_fixed.items():
-            text = text.replace(placeholder, fixed_block)
-        
-        # Fix spacing around inline math
+        # 8. Fix spacing around inline math
         text = format_inline_math_spacing(text)
         
-        # --- Phase 5: Restore code blocks and final cleanup ---
+        # 9. Format display math blocks
+        text = format_display_math_blocks(text)
         
-        # Restore code blocks
+        # 10. Restore code blocks
         for placeholder, original in code_blocks.items():
-            text = text.replace(placeholder, original, 1)
+            text = text.replace(placeholder, original)
         
-        # Format code blocks
-        text = self._format_code_blocks(text)
+        # 11. Apply compact math formatting for better LaTeX spacing
+        text = compact_math_blocks(text)
         
-        # Final cleanup of excessive newlines
+        # 12. Clean up excessive newlines
         text = re.sub(r'\n{3,}', '\n\n', text).strip()
-        
-        if self.verbose and text != original_text:
-            print("  Applied formatting fixes.")
         
         return text
     
     def apply_math_fixes(self, text: str) -> str:
-        """
-        Apply only math-related formatting fixes to the text.
-        Used primarily for OCR output processing.
-        
-        Args:
-            text: The raw text content to format
-            
-        Returns:
-            The text with math formatting fixed
-        """
-        original_text = text
-        
-        # Protect code blocks from changes
+        """Apply only math-related formatting fixes."""
+        # Simplified version that just handles math fixes
         text, code_blocks = protect_code_blocks(text)
-        
-        # Fix malformed math delimiters
-        text = self._fix_malformed_math_delimiters(text)
-        
-        # Fix LaTeX delimiters
         text = fix_latex_delimiters(text)
+        text, display_math, inline_math = protect_and_extract_math(text)
         
-        # Extract and process math blocks
-        text, display_math_blocks, inline_math_blocks = protect_and_extract_math(text)
-        
-        # Process display math
-        display_math_fixed = {}
-        for placeholder, math_block in display_math_blocks.items():
-            content = re.match(r'\$\$(.*?)\$\$', math_block, re.DOTALL).group(1)
+        # Process math content
+        for placeholder, math_block in inline_math.items():
+            content = math_block.strip('$')
+            fixed_content = fix_math_content(content)
+            text = text.replace(placeholder, f"${fixed_content}$")
+            
+        for placeholder, math_block in display_math.items():
+            content = math_block.strip('$')
             fixed_content = fix_math_content(content, is_display_math=True)
-            display_math_fixed[placeholder] = f"$${fixed_content}$$"
+            text = text.replace(placeholder, f"$${fixed_content}$$")
         
-        # Process inline math
-        inline_math_fixed = {}
-        for placeholder, math_block in inline_math_blocks.items():
-            content = re.match(r'\$(.*?)\$', math_block).group(1)
-            fixed_content = fix_math_content(content, is_display_math=False)
-            inline_math_fixed[placeholder] = f"${fixed_content}$"
-        
-        # Restore math blocks
-        for placeholder, fixed_block in display_math_fixed.items():
-            text = text.replace(placeholder, fixed_block)
-        
-        text = format_display_math_blocks(text)
-        
-        for placeholder, fixed_block in inline_math_fixed.items():
-            text = text.replace(placeholder, fixed_block)
-        
+        # Fix spacing around inline math
         text = format_inline_math_spacing(text)
+        
+        # Apply compact math formatting
+        text = compact_math_blocks(text)
         
         # Restore code blocks
         for placeholder, original in code_blocks.items():
-            text = text.replace(placeholder, original, 1)
-        
-        if self.verbose and text != original_text:
-            print("  Applied math formatting fixes.")
+            text = text.replace(placeholder, original)
         
         return text
     

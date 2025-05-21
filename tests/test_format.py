@@ -1,4 +1,4 @@
-from obsidian_librarian.commands.utilities.format_fixer import FormatFixer
+from obsidian_librarian.commands.utilities.simplified_format_fixer import FormatFixer
 import sys
 import os # Import os for path manipulation
 

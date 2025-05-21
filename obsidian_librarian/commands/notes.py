@@ -6,12 +6,12 @@ import pyperclip
 import time
 from datetime import datetime
 from ..config import get_config
-from ..utils.post_process_formatting import clean_raw_llm_output
+from ..utils.post_process_formatting import clean_llm_output
 from ..utils.ai import generate_note_content
 from ..utils.file_operations import sanitize_filename
 from ..commands.utilities.format_fixer import FormatFixer
 from ..commands.ocr import process_image_with_gpt4v, extract_image_paths_from_md
-from ..utils.post_process_formatting import post_process_ocr_output
+from ..utils.post_process_formatting import process_ocr_output
 
 def get_all_note_titles(vault_path):
     """Get all note titles in the vault (without .md extension)"""

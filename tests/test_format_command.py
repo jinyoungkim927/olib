@@ -46,7 +46,7 @@ except Exception as e:
 # Verify the formatter works directly
 print("\nVerifying formatter directly...")
 # --- FIX: Import the class, instantiate, and call method ---
-from obsidian_librarian.commands.utilities.format_fixer import FormatFixer
+from obsidian_librarian.commands.utilities.simplified_format_fixer import FormatFixer
 
 fixer_instance = FormatFixer()
 fixed_content = fixer_instance.apply_all_fixes(content)

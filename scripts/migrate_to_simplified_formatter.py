@@ -14,7 +14,7 @@ import argparse
 from pathlib import Path
 
 OLD_IMPORTS = [
-    "from obsidian_librarian.commands.utilities.format_fixer import FormatFixer",
+    "from obsidian_librarian.commands.utilities.simplified_format_fixer import FormatFixer",
     "from obsidian_librarian.utils.post_process_formatting import",
     "from obsidian_librarian.utils.formatting import",
     "from ..utils.post_process_formatting import",
@@ -22,15 +22,15 @@ OLD_IMPORTS = [
 ]
 
 NEW_IMPORTS = {
-    "from obsidian_librarian.commands.utilities.format_fixer import FormatFixer": 
+    "from obsidian_librarian.commands.utilities.simplified_format_fixer import FormatFixer": 
         "from obsidian_librarian.commands.utilities.simplified_format_fixer import FormatFixer",
-    "from obsidian_librarian.utils.post_process_formatting import clean_raw_llm_output": 
+    "from obsidian_librarian.utils.simplified_post_process import clean_llm_output": 
         "from obsidian_librarian.utils.simplified_post_process import clean_llm_output",
-    "from obsidian_librarian.utils.post_process_formatting import post_process_ocr_output": 
+    "from obsidian_librarian.utils.simplified_post_process import process_ocr_output": 
         "from obsidian_librarian.utils.simplified_post_process import process_ocr_output",
-    "from ..utils.post_process_formatting import clean_raw_llm_output": 
+    "from ..utils.simplified_post_process import clean_llm_output": 
         "from ..utils.simplified_post_process import clean_llm_output",
-    "from ..utils.post_process_formatting import post_process_ocr_output": 
+    "from ..utils.simplified_post_process import process_ocr_output": 
         "from ..utils.simplified_post_process import process_ocr_output",
 }
 

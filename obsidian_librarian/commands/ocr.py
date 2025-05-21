@@ -14,7 +14,7 @@ import datetime
 from openai import OpenAI
 
 from ..config import get_config
-from ..utils.post_process_formatting import post_process_ocr_output
+from ..utils.post_process_formatting import process_ocr_output
 from .utilities.format_fixer import FormatFixer
 
 
@@ -156,7 +156,7 @@ def ocr_note(note_name, keep_timestamps=False):
             raw_ocr = process_image_with_gpt4v(str(image_path), note_name)
             
             # Process OCR text
-            processed_ocr = post_process_ocr_output(raw_ocr)
+            processed_ocr = process_ocr_output(raw_ocr)
             
             # Add timestamp if requested
             if keep_timestamps:
