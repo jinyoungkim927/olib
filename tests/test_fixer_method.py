@@ -7,10 +7,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from obsidian_librarian.commands.utilities.format_fixer import FormatFixer
-
-# Instantiate the fixer (arguments don't matter for direct method testing)
-fixer = FormatFixer()
+from obsidian_librarian.utils.latex_formatting import fix_latex_delimiters
 
 # --- Test Cases ---
 test_strings = [
@@ -38,12 +35,12 @@ test_strings = [
     (r"Handle \$ spaced content \$ correctly.", r"Handle $ spaced content $ correctly."),
 ]
 
-print("--- Testing _fix_escaped_latex_delimiters ---")
+print("--- Testing fix_latex_delimiters ---")
 all_passed = True
 for i, (input_text, expected_output) in enumerate(test_strings):
     print(f"\nTest {i+1}:")
     print(f"  Input:    {input_text!r}")
-    actual_output = fixer._fix_escaped_latex_delimiters(input_text)
+    actual_output = fix_latex_delimiters(input_text)
     print(f"  Output:   {actual_output!r}")
     print(f"  Expected: {expected_output!r}")
     if actual_output == expected_output:

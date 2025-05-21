@@ -21,11 +21,9 @@ obsidian_librarian/commands/analytics.py
 obsidian_librarian/commands/check.py
 obsidian_librarian/commands/config.py
 obsidian_librarian/commands/fixed_latex_linking.py
-obsidian_librarian/commands/fixed_notes.py
 obsidian_librarian/commands/format.py
 obsidian_librarian/commands/history.py
 obsidian_librarian/commands/index.py
-obsidian_librarian/commands/latex_aware_linking.py
 obsidian_librarian/commands/notes.py
 obsidian_librarian/commands/ocr.py
 obsidian_librarian/commands/search.py
@@ -38,4 +36,5 @@ obsidian_librarian/utils/ai.py
 obsidian_librarian/utils/file_operations.py
 obsidian_librarian/utils/formatting.py
 obsidian_librarian/utils/indexing.py
+obsidian_librarian/utils/latex_formatting.py
 obsidian_librarian/utils/post_process_formatting.py
