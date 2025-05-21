@@ -6,7 +6,6 @@ from pathlib import Path
 import logging
 from collections import deque # For the queue
 import re # <-- Add this import
-from sklearn.metrics.pairwise import cosine_similarity # <-- Add this import
 # --- Add datetime for timestamp ---
 from datetime import datetime
 # --- End Add ---
@@ -110,6 +109,7 @@ def prerequisites(note, content_threshold, title_threshold, llm_model, embedding
     """Analyzes a note to find prerequisite concepts and checks if they exist in the vault."""
     import numpy as np
     from sentence_transformers import SentenceTransformer
+    from sklearn.metrics.pairwise import cosine_similarity # <-- Moved import here
     start_time = time.time()
     config = get_config()
     formatter = FormatFixer(verbose=False) # Initialize formatter early

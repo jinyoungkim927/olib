@@ -1,64 +1,35 @@
-# game-theory
+[[Shapley Values]] $\phi_i(v)$ for player $i$ is the average of $i$'s marginal contributions across all orderings (permutations) of players:$$\phi_i(v) = \sum_{S \subseteq N \setminus \{i\}} \frac{|S|!(n - |S| - 1)!}{n!} \left[v(S \cup \{i\}) - v(S)\right]$$Interpretation: [[Expectation]] over [[Permutations]] $\pi$ of players; for each $\pi$, $i$'s contribution is:$$v(\text{predecessors of } i \cup \{i\}) - v(\text{predecessors of } i)$$
+**Setting**:
 
-**Shapley Values (Game Theory)**
-
-**Setting**
-Cooperative game with transferable utility (TU game):
-A set of players $N = {1, \dots, n}$ and a characteristic function $v: 2^N \to \mathbb{R}$ assigning a value $v(S)$ to each coalition $S \subseteq N$ such that $v(\emptyset) = 0$.
+- Cooperative game with transferable utility (TU game):
+- A set of players $N = {1, \dots, n}$ and a [[Characteristic Function]] $v: 2^N \to \mathbb{R}$ assigning a value $v(S)$ to each coalition $S \subseteq N$ such that $v(\emptyset) = 0$.
 
 **Goal**
-Distribute total value $v(N)$ among players fairly based on their **marginal contributions**.
-
-**Definition**
-Shapley value $\phi\_i(v)$ for player $i$ is the average of $i$'s marginal contributions across all orderings (permutations) of players:
-
-$$
-
-\phi_i(v) = \sum_{S \subseteq N \setminus \{i\}} \frac{|S|!(n - |S| - 1)!}{n!} \left[v(S \cup \{i\}) - v(S)\right]
-
-$$
-
-Interpretation: Expectation over permutations $\pi$ of players; for each $\pi$, $i$'s contribution is:
-
-$$
-
-v(\text{predecessors of } i \cup \{i\}) - v(\text{predecessors of } i)
-
-$$
+Distribute total value $v(N)$ among players fairly based on their marginal contributions.
 
 **Axioms Characterizing the Shapley Value**
 
-1. **Efficiency**: $\sum\_{i \in N} \phi\_i(v) = v(N)$
-2. **Symmetry**: If $v(S \cup{i}) = v(S \cup{j})$ for all $S \not\ni i,j$, then $\phi\_i(v) = \phi\_j(v)$
-3. **Dummy player**: If $v(S \cup{i}) = v(S)$ for all $S$, then $\phi\_i(v) = 0$
-4. **Additivity**: For games $v,w$, $\phi\_i(v + w) = \phi\_i(v) + \phi\_i(w)$
+1. Efficiency: $\sum_{i \in N} \phi_i(v) = v(N)$
+2. Symmetry: If $v(S \cup {i}) = v(S \cup {j})$ for all $S \not\ni i,j$, then $\phi_i(v) = \phi_j(v)$
+3. Dummy player: If $v(S \cup {i}) = v(S)$ for all $S$, then $\phi_i(v) = 0$
+4. Additivity: For games $v,w$, $\phi_i(v + w) = \phi_i(v) + \phi_i(w)$
 
 **Properties**
 
-* **Unique**: Shapley value is the unique function satisfying the above axioms.
-* **Linearity**: Computation decomposes over basis games.
-* **Fairness**: Reflects marginal contributions over uncertainty about coalition formation.
+- Unique: Shapley value is the unique function satisfying the above axioms.
+- Linearity: Computation decomposes over basis games.
+- Fairness: Reflects marginal contributions over uncertainty about coalition formation.
 
 **Special Case: 3-player Example**
-Let $N = {1,2,3}$, define values for all subsets, then:
-
-$$
-
-\phi_1 = \frac{1}{6} \sum_{\pi} \text{marginal contribution of } 1 \text{ in } \pi
-
-$$
-
-e.g., if $v({1}) = 1$, $v({1,2}) = 4$, $v({1,2,3}) = 7$, compute $\phi\_i$ for each player.
+Let $N = {1,2,3}$, define values for all subsets, then:$$\phi_1 = \frac{1}{6} \sum_{\pi} \text{marginal contribution of } 1 \text{ in } \pi$$e.g., if $v({1}) = 1$, $v({1,2}) = 4$, $v({1,2,3}) = 7$, compute $\phi_i$ for each player.
 
 **Applications**
 
-* Cost/revenue sharing in coalition settings
-* Attribution in machine learning (e.g., SHAP)
-* Voting power (Banzhaf vs. Shapley-Shubik indices)
+- Cost/revenue sharing in coalition settings
+- Attribution in machine learning (e.g., SHAP)
+- Voting power (Banzhaf vs. Shapley-Shubik indices)
 
 **Computation Complexity**
 
-* Exact computation is exponential in $n$ (due to summation over $2^n$ subsets)
-* Approximation via sampling permutations (Monte Carlo methods)
-
-Let me know if you want ML-specific interpretations or extensions to weighted Shapley values.
+- Exact computation is exponential in $n$ (due to summation over $2^n$ subsets)
+- Approximation via sampling permutations (Monte Carlo methods)

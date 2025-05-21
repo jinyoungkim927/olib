@@ -1,10 +1,20 @@
-Please write detailed notes about {note_name}. Transcribe the content from the image faithfully, and then organize that information in an appropriate way. Format the response in markdown.
+Please transcribe the content from this image related to {note_name}.
 
-Some important formatting guidelines:
-1. For mathematical expressions, use Markdown's single dollar signs ($) for inline math and double dollar signs ($$) for display math.
-2. Ensure math delimiters are properly paired and balanced.
-3. Don't leave spaces between dollar delimiters and the math content (write $x^2$ not $ x^2 $).
-4. For LaTeX environments like align, matrix, etc., convert them to standard Markdown math blocks with double dollar signs.
-5. Use LaTeX notation for all mathematical symbols and expressions.
-6. If the image contains diagrams or figures, describe them clearly.
-7. Preserve the hierarchical structure of the content with appropriate headings and lists.
+Use the following formatting guidelines:
+1. Convert all mathematical notation to proper LaTeX format with $ for inline math and $$ for display math
+2. Format the response in clean markdown with appropriate headers, lists, and paragraphs
+3. Use proper formatting for LaTeX with no escaped underscores (use a_1 not a\_1)
+4. When appropriate, create WikiLinks [[Like This]] for key technical terms
+5. Use consistent bullet points with hyphens (-)
+6. Use proper spacing around LaTeX equations
+
+IMPORTANT LaTeX Notes:
+- Don't escape underscores inside math expressions: use $a_1$ not $a\_1$
+- Use \text{} for text within math: $\text{This is text}$
+- Ensure all math expressions are properly delimited: use $...$ (inline) or $$...$$ (display)
+- Don't put spaces inside math delimiters: use $x$ not $ x $
+- Make sure display math is properly formatted with $$ at the beginning and end
+- Avoid line breaks inside equations unless necessary for readability
+
+If the image contains diagrams or figures, describe them clearly.
+The goal is to create a clean, searchable version of the image content that follows Obsidian markdown best practices.

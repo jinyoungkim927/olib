@@ -2,12 +2,17 @@ import click
 import os
 from pathlib import Path
 import base64
+import re
+import datetime
 # import json # No longer needed for this direct API call
 # import requests # Will use the OpenAI client instead
 from openai import OpenAI # Add OpenAI import
 from ..config import get_config
+from ..utils.post_process_formatting import clean_raw_llm_output, post_process_ocr_output
+from .utilities.format_fixer import FormatFixer
 
 def encode_image(image_path):
+    """Encode an image file to base64 for API transmission."""
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
@@ -23,8 +28,22 @@ def process_image_with_gpt4v(image_path, note_name):
     client = OpenAI(api_key=api_key)
     base64_image = encode_image(image_path)
 
-    # Consider using a shared prompt or loading from a file like in notes.py for more complex prompts
-    ocr_prompt = f"Please write detailed notes about {note_name}. Transcribe the content from the image faithfully, and then organize that information in an appropriate way. Format the response in markdown."
+    # Load prompt from file if it exists
+    prompt_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 
+                              "prompts", "ocr_prompt.txt")
+    
+    if os.path.exists(prompt_file):
+        with open(prompt_file, 'r') as f:
+            ocr_prompt_template = f.read()
+        ocr_prompt = ocr_prompt_template.replace("{note_name}", note_name)
+    else:
+        # Fallback prompt
+        ocr_prompt = (
+            f"Please transcribe the content from this image related to {note_name}. "
+            f"Convert all mathematical notation to proper LaTeX format with $ and $$ delimiters. "
+            f"Format the response in clean markdown with appropriate headers, lists, and paragraphs. "
+            f"Be particularly careful with LaTeX formatting - use single $ for inline math and $$ for display math."
+        )
 
     try:
         response = client.chat.completions.create(
@@ -80,9 +99,29 @@ def process_image_with_gpt4v(image_path, note_name):
         except Exception as final_e:
             raise Exception(f"OpenAI API Error after fallback: {final_e}")
 
+def extract_image_paths_from_md(md_path):
+    """Extract image references from markdown file."""
+    with open(md_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    # Find all image references in the format ![[image.png]]
+    image_references = re.findall(r'!\[\[(.*?)\]\]', content)
+    
+    # Map to full paths
+    note_dir = md_path.parent
+    image_paths = []
+    for ref in image_references:
+        # Handle relative paths within the vault
+        img_path = note_dir / ref
+        if img_path.exists():
+            image_paths.append(img_path)
+    
+    return image_paths
+
 @click.command()
 @click.argument('note_name')
-def ocr_note(note_name):
+@click.option('--keep-timestamps', is_flag=True, help='Keep OCR processing timestamps in output')
+def ocr_note(note_name, keep_timestamps=False):
     """Convert images in notes to text using OCR"""
     config = get_config()
     vault_path = config.get('vault_path')
@@ -95,26 +134,67 @@ def ocr_note(note_name):
     if not note_path.exists():
         click.echo(f"Error: Note {note_name} not found")
         return
-
-    # Find all images in the note's directory
-    note_dir = note_path.parent
-    image_extensions = ('.png', '.jpg', '.jpeg', '.webp')
-    images = [f for f in note_dir.glob(f"{note_name}.*") if f.suffix.lower() in image_extensions]
-
-    if not images:
-        click.echo("No images found for this note")
+    
+    # Create the FormatFixer instance
+    formatter = FormatFixer(verbose=True)
+    
+    # Process images referenced in the markdown file
+    image_paths = extract_image_paths_from_md(note_path)
+    
+    if not image_paths:
+        click.echo("No image references found in note")
         return
-
-    for image_path in images:
-        click.echo(f"Processing image: {image_path}")
+    
+    # Read the original file content
+    with open(note_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    # Process each referenced image
+    successful_ocr_count = 0
+    for image_path in image_paths:
+        click.echo(f"Processing image: {image_path.name}")
         try:
-            content = process_image_with_gpt4v(str(image_path), note_name)
+            # Get OCR content
+            raw_ocr_content = process_image_with_gpt4v(str(image_path), note_name)
             
-            # Create new markdown file with OCR results
-            output_path = note_dir / f"{note_name}_ocr.md"
-            with open(output_path, 'w') as f:
-                f.write(content)
+            # Apply comprehensive OCR-specific cleanup
+            # First apply general LLM output cleanup
+            cleaned_content = clean_raw_llm_output(raw_ocr_content)
             
-            click.echo(f"OCR results saved to: {output_path}")
+            # Then apply more comprehensive OCR formatting
+            cleaned_content = post_process_ocr_output(cleaned_content)
+            
+            # Add timestamp if requested
+            if keep_timestamps:
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                processed_content = f"---\n\nOCR processing: {timestamp}\n\n{cleaned_content}"
+            else:
+                processed_content = cleaned_content
+            
+            # Find the image reference and replace it
+            image_ref_pattern = f"!\\[\\[{re.escape(image_path.name)}\\]\\]"
+            if re.search(image_ref_pattern, content):
+                # Apply final formatting using FormatFixer
+                # This will handle math blocks, spacing, and other formatting details
+                formatted_content = formatter.apply_math_fixes(processed_content)
+                
+                # Replace the image reference with both the image and the OCR text
+                content = re.sub(
+                    image_ref_pattern,
+                    f"![[{image_path.name}]]\n{formatted_content}",
+                    content
+                )
+                successful_ocr_count += 1
+            else:
+                click.echo(f"  Warning: Could not find reference to {image_path.name} in the note")
         except Exception as e:
-            click.echo(f"Error processing image: {e}")
+            click.echo(f"Error processing image {image_path.name}: {e}")
+    
+    # Write the updated content back to the file
+    if successful_ocr_count > 0:
+        with open(note_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        click.echo(f"OCR results added for {successful_ocr_count} image(s) in: {note_path.name}")
+    else:
+        click.echo("No OCR results were added to the note.")
+    

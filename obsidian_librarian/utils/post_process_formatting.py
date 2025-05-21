@@ -5,7 +5,7 @@ def remove_markdown_fences(content):
     return re.sub(r'^```markdown\n|```\n?$', '', content.strip())
 
 def convert_latex_delimiters(content):
-    """Convert LaTeX delimiters from \( \) to $ and \[ \] to $$, handling multi-line cases"""
+    """Convert LaTeX delimiters from \\( \\) to $ and \\[ \\] to $$, handling multi-line cases"""
     # Convert display math (multi-line)
     content = re.sub(r'\\\[\s*(.*?)\s*\\\]', r'$$\1$$', content, flags=re.DOTALL)
     # Convert inline math
@@ -82,71 +82,197 @@ def clean_raw_llm_output(text: str) -> str:
     Cleans raw text output from LLMs, focusing on common LaTeX-related issues,
     before more structured formatting is applied.
     This aims to prevent "bad escape" errors in subsequent regex processing.
+    
+    This function is primarily used for OCR output and LLM-generated LaTeX.
     """
     if not isinstance(text, str):
         return text
 
-    # 1. Normalize double backslashes before commands or symbols: \\command -> \command, \\$ -> \$
-    # Handles cases like \\section, \\alpha, \\$, \\{, etc.
+    # Extract and protect existing code blocks from changes
+    code_blocks = {}
+    code_placeholder_template = "___CODE_BLOCK_PLACEHOLDER_{}___"
+    for i, match in enumerate(re.finditer(r'```.*?```', text, flags=re.DOTALL)):
+        placeholder = code_placeholder_template.format(i)
+        code_blocks[placeholder] = match.group(0)
+        text = text.replace(match.group(0), placeholder, 1)
+
+    # 1. BASIC ESCAPING FIXES
+
+    # Fix double backslashes before commands or symbols
+    # \\command -> \command, \\$ -> \$
     text = re.sub(r'\\\\([a-zA-Z@#$%^&*()\[\]{}<>.?!~\-_+=|:;"\'`])', r'\\\1', text)
 
-    # 2. Fix backslash followed by space then a command/symbol: \ command -> \command or \ symbol -> \symbol
-    # Matches '\ ' only if followed by a potential command start (letter) or another backslash (for symbols like '\(')
+    # Fix backslash followed by space before a command
+    # "\ command" -> "\command"
     text = re.sub(r'\\ (?=([a-zA-Z]|\\))', r'\\', text)
 
-    # 3. Specifically target single erroneous backslashes before specific letters
-    #    that were observed to cause "bad escape" errors (e.g., \T, \s, \p, \m, \l, \i).
-    #    This converts "\X" to "X" if X is one of these problematic characters and
-    #    it's not followed by another letter (which would make it a longer command) or an opening brace.
-    problematic_chars = ['T', 's', 'p', 'm', 'l', 'i']
-    for char_code in problematic_chars:
-        # We need to re.escape(char_code) in case char_code is a regex metacharacter (e.g. if '.' was in the list)
-        # For the current list, it's not strictly necessary but good practice.
-        escaped_char = re.escape(char_code)
+    # 2. SPECIFIC LATEX COMMAND FIXES
+
+    # Fix missing backslash in \text{} - very common in OCR output
+    # "ext{text}" -> "\text{text}"
+    text = re.sub(r'(^|\s)ext{', r'\1\\text{', text)
+    text = re.sub(r'(^|\s)ext\s+{', r'\1\\text{', text)
+    
+    # Fix common LaTeX command OCR errors
+    common_command_fixes = {
+        # Greek letters
+        r'(^|\s)heta\b': r'\1\\theta',
+        r'(^|\s)elta\b': r'\1\\delta', 
+        r'(^|\s)mega\b': r'\1\\omega',
+        r'(^|\s)alpha\b': r'\1\\alpha',
+        r'(^|\s)beta\b': r'\1\\beta',
+        r'(^|\s)gamma\b': r'\1\\gamma',
+        r'(^|\s)lambda\b': r'\1\\lambda',
+        r'(^|\s)sigma\b': r'\1\\sigma',
+        r'(^|\s)tau\b': r'\1\\tau',
+        r'(^|\s)phi\b': r'\1\\phi',
+        r'(^|\s)psi\b': r'\1\\psi',
         
-        # Pattern: (\\) (problematic_char) (not followed by a letter or '{')
-        # Replacement: just the problematic_char (removes the leading backslash)
-        # Example: \T -> T, but \Text or \T{...} would be untouched by this specific rule for 'T'.
-        # It also avoids affecting valid sequences like `\ ` (escaped space) or `\$`.
-        pattern = r'\\(' + escaped_char + r')(?![a-zA-Z{])'
-        replacement = r'\1' 
+        # Math symbols and operators
+        r'(^|\s)ightarrow\b': r'\1\\rightarrow',
+        r'(^|\s)leftarrow\b': r'\1\\leftarrow',
+        r'(^|\s)infty\b': r'\1\\infty',
+        r'(^|\s)sum(?![a-zA-Z])': r'\1\\sum',
+        r'(^|\s)prod(?![a-zA-Z])': r'\1\\prod',
+        r'(^|\s)cdot\b': r'\1\\cdot',
+        r'(^|\s)prime\b': r'\1\\prime',
+        r'(^|\s)nabla\b': r'\1\\nabla',
+        r'(^|\s)partial\b': r'\1\\partial',
+        r'(^|\s)forall\b': r'\1\\forall',
+        r'(^|\s)exists\b': r'\1\\exists',
+        r'(^|\s)subset\b': r'\1\\subset',
+        
+        # Math environments and formatting
+        r'(^|\s)frac\s': r'\1\\frac ',
+        r'(^|\s)mathbb\s': r'\1\\mathbb ',
+        r'(^|\s)mathcal\s': r'\1\\mathcal ',
+        r'(^|\s)mathrm\s': r'\1\\mathrm ',
+        r'(^|\s)mathbf\s': r'\1\\mathbf ',
+        r'(^|\s)mathit\s': r'\1\\mathit ',
+    }
+    
+    for pattern, replacement in common_command_fixes.items():
         text = re.sub(pattern, replacement, text)
     
-    # 4. Remove backslash before a standalone space if it's not a recognized LaTeX space command.
-    # LaTeX uses `\ ` for a normal inter-word space in certain contexts, or `\,`, `\;`, etc.
-    # If we find `\ ` followed by a non-alphanumeric character (excluding typical LaTeX ones),
-    # it might be an error. This is a bit more heuristic.
-    # Example: "word \ and word" -> "word and word"
-    # This regex looks for '\ ' NOT followed by typical command/symbol starters or brackets.
-    # text = re.sub(r'\\ (?![a-zA-Z\\\[({%])', ' ', text) # This might be too aggressive.
+    # Fix spacing in LaTeX commands that take arguments
+    # "\command {arg}" -> "\command{arg}"
+    text = re.sub(r'(\\[a-zA-Z]+)\s+({)', r'\1\2', text)
+    text = re.sub(r'(\\[a-zA-Z]+)\s+(\()', r'\1\2', text)
+    text = re.sub(r'(\\[a-zA-Z]+)\s+(\[)', r'\1\2', text)
+
+    # 3. UNDERSCORE AND SUPERSCRIPT FIXES
+    
+    # Fix escaped underscores in math (not needed in math mode)
+    # "a\_i" -> "a_i"
+    text = re.sub(r'(\$[^\$]*?)\\_(.*?\$)', r'\1_\2', text)  # for inline math
+    text = re.sub(r'(\$\$[^\$]*?)\\_(.*?\$\$)', r'\1_\2', text, flags=re.DOTALL)  # for block math
+    
+    # Handle multiple underscores in the same math block
+    while re.search(r'(\$[^\$]*?)\\_(.*?\$)', text) or re.search(r'(\$\$[^\$]*?)\\_(.*?\$\$)', text, flags=re.DOTALL):
+        text = re.sub(r'(\$[^\$]*?)\\_(.*?\$)', r'\1_\2', text)  # for inline math
+        text = re.sub(r'(\$\$[^\$]*?)\\_(.*?\$\$)', r'\1_\2', text, flags=re.DOTALL)  # for block math
+    
+    # Same for carets (superscripts)
+    # "a\^i" -> "a^i"
+    text = re.sub(r'(\$[^\$]*?)\\\^(.*?\$)', r'\1^\2', text)  # for inline math
+    text = re.sub(r'(\$\$[^\$]*?)\\\^(.*?\$\$)', r'\1^\2', text, flags=re.DOTALL)  # for block math
+
+    # 4. SPACING AND DELIMITER FIXES
+    
+    # Fix the "$F$to$A$" problem (missing spaces between inline math and words)
+    text = re.sub(r'(\$[^\$\n]+\$)([a-zA-Z0-9])', r'\1 \2', text)
+    text = re.sub(r'([a-zA-Z0-9])(\$[^\$\n]+\$)', r'\1 \2', text)
+    
+    # Fix missing/malformed delimiters in math expressions
+    # Fix unclosed math expressions (only if they look like math)
+    # Only fix if the content contains math operators or has at least 3 chars
+    text = re.sub(r'\$([^$\n]{3,}|[^$\n]*?[+\-*/=<>\^_][^$\n]*)(?!\$)(?=\s|$)', r'$\1$', text)
+    
+    # Collapse consecutive dollar signs (common OCR error)
+    text = re.sub(r'\${3,}', r'$$', text)  # $$$$ -> $$
+    text = re.sub(r'(?<!\\)(\$)(\$+)([^$]+)(\$)(\$+)', r'$$\3$$', text)  # $$$x$$$ -> $$x$$
+    
+    # Fix alternating inline/display math (OCR error)
+    text = re.sub(r'\$\$([^$]+)\$(?!\$)', r'$$\1$$', text)  # $$x$ -> $$x$$
+    text = re.sub(r'\$([^$]+)\$\$(?!\$)', r'$$\1$$', text)  # $x$$ -> $$x$$
+    
+    # 5. PROBLEMATIC ESCAPE FIXES
+    
+    # Fix erroneous backslashes before specific letters known to cause "bad escape" errors
+    # "\T", "\s", "\p", etc. that aren't actually LaTeX commands
+    problematic_chars = ['T', 's', 'p', 'm', 'l', 'i', 'q', 'z', 'k', 'j', 'h', 'f', 'b', 'g', 'c', 'd', 'e']
+    for char in problematic_chars:
+        # Only replace if not followed by letters or brace (not a real LaTeX command)
+        # Only do this in math blocks
+        text = re.sub(r'(\$[^\$]*?)\\(' + char + r')(?![a-zA-Z{])(.*?\$)', r'\1\2\3', text)
+        text = re.sub(r'(\$\$[^\$]*?)\\(' + char + r')(?![a-zA-Z{])(.*?\$\$)', r'\1\2\3', text, flags=re.DOTALL)
+    
+    # 6. LATEX ENVIRONMENT CONVERSION AND CLEANUP
+    
+    # Convert LaTeX environments to simpler markdown math
+    text = re.sub(r'\\begin{equation}(.*?)\\end{equation}', r'$$\1$$', text, flags=re.DOTALL)
+    text = re.sub(r'\\begin{equation\*}(.*?)\\end{equation\*}', r'$$\1$$', text, flags=re.DOTALL)
+    text = re.sub(r'\\begin{align}(.*?)\\end{align}', r'$$\1$$', text, flags=re.DOTALL)
+    text = re.sub(r'\\begin{align\*}(.*?)\\end{align\*}', r'$$\1$$', text, flags=re.DOTALL)
+    text = re.sub(r'\\begin{gathered}(.*?)\\end{gathered}', r'$$\1$$', text, flags=re.DOTALL)
+    text = re.sub(r'\\begin{cases}(.*?)\\end{cases}', r'$$\\begin{cases}\1\\end{cases}$$', text, flags=re.DOTALL)
+    
+    # Convert LaTeX delimiters
+    text = re.sub(r'\\\[(.*?)\\\]', r'$$\1$$', text, flags=re.DOTALL)
+    text = re.sub(r'\\\((.*?)\\\)', r'$\1$', text, flags=re.DOTALL)
+    
+    # 7. GENERAL MARKDOWN CLEANUP
+    
+    # Remove OCR timestamp headers 
+    text = re.sub(r'---\s*\nOCR processing: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*\n+', '', text)
+    
+    # Clean up excessive newlines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    # Clean up spacing in display math blocks (ensure single newlines around display math)
+    text = re.sub(r'([^\n])\$\$', r'\1\n$$', text)  # Ensure newline before display math
+    text = re.sub(r'\$\$([^\n])', r'$$\n\1', text)  # Ensure newline after display math
+    text = re.sub(r'\n\n\$\$', r'\n$$', text)       # But not excessive newlines
+    text = re.sub(r'\$\$\n\n', r'$$\n', text)       # But not excessive newlines
+    
+    # Restore protected code blocks
+    for placeholder, content in code_blocks.items():
+        text = text.replace(placeholder, content)
 
     return text
 
 def post_process_ocr_output(text: str) -> str:
     """
-    General post-processing for OCR output after initial LLM cleaning.
-    This can include trimming, fixing very basic Markdown, etc.
+    Comprehensive post-processing for OCR output after initial LLM cleaning.
+    Applies multiple formatting steps to clean up and standardize the text.
+    
+    This is the main entry point for OCR text processing.
     """
     if not isinstance(text, str):
         return text
     
+    # 1. Basic cleaning
     text = text.strip()
-    # Add any other general, non-LaTeX specific post-processing here.
-    # For example, ensuring consistent line breaks or removing excessive blank lines
-    # if not handled by FormatFixer.
+    text = remove_markdown_fences(text)
     
-    # Example: Normalize multiple newlines to a maximum of two
-    text = re.sub(r'\n{3,}', '\n\n', text)
+    # 2. LaTeX and math formatting
+    text = clean_raw_llm_output(text)  # First apply general LLM/OCR cleanup
+    text = convert_latex_delimiters(text)  # Convert \( \) to $ $ and \[ \] to $$ $$
+    text = format_latex(text)  # Format LaTeX expressions
+    
+    # 3. Markdown structure formatting
+    text = format_bullet_points(text)  # Standardize bullet points
+    text = adjust_heading_levels(text)  # Convert headers appropriately
+    text = unindent_content(text)  # Fix indentation issues
+    
+    # 4. Final cleanups
+    text = remove_extra_newlines(text)  # Clean up excessive newlines
+    
+    # 5. Specific improvements for OCR
+    # Make sure consecutive equations are properly formatted (no extra blank lines)
+    text = re.sub(r'\$\$\s*\n\s*\n+\s*\$\$', r'$$\n$$', text)
+    
+    # Fix common OCR layout issues
+    text = re.sub(r'(\*\*.+?\*\*)\s*\n\s*:\s*', r'\1: ', text)  # Fix "**Title**\n: content"
     
     return text
-
-def post_process_ocr_output(content):
-    """Apply all post-processing steps to OCR output"""
-    content = remove_markdown_fences(content)
-    content = convert_latex_delimiters(content)
-    content = adjust_heading_levels(content)
-    content = format_latex(content)
-    content = format_bullet_points(content)
-    content = unindent_content(content)
-    content = remove_extra_newlines(content)
-    return content

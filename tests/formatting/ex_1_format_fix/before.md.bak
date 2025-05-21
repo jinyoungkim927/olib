@@ -1,0 +1,49 @@
+# game-theory
+
+Here is the full solution in your preferred markdown and LaTeX format, following your style conventions for technical rigor and concision.
+
+---
+
+**5. Subgame-Perfect Equilibria in Repeated [[Zero-Sum Games]]**
+
+Let $G = \langle N, A, g \rangle $ be a finite, two-player, [[zero-sum game]] with $ N = {1,2}$, $ A = A_1 \times A_2$, and $ g_1(a) = u(a)$, ___INLINE_M $ for all $r ___DISPLAY_M$ is a maxmin action for player 2 if $__INLINE_MATH_11___delta) \sum_{t=0}^{\i $ by playing a stationary strategy $_2^t)] \g$ that always plays a [[maxmin]] action $ SPLAY_MATH_17___. Therefore,
+_$. By symmetry and the zero-sum property, we also get $ quad \text{and} \quad u_1(\sigma_1, \sigma_2) \leq 
+$$
+ and 
+$$
+ ightarrow u_1 = v_1, \quad u_2 = v_2
+$
+$$
+
+$$
+$
+$$
+**(b) Subgame-perfect equilibrium implies [[maxmin]] payoffs in every subgame**
+
+Let 
+$$
+(\sigma_1, \sigma_2)
+$
+$$
+$$
+ be a subgame-perfect equilibrium. Then for any history 
+$
+$$
+ h 
+$$
+, the continuation strategy 
+$
+$$
+(\sigma_1|h, \sigma_2|h)
+$$
+is a [[Nash equilibrium]] of the subgame. By (a), we must have:
+$
+$$
+$$
+$
+$$
+u_i(\sigma_1, \sigma_2 \mid h) = v_i \quad \text{for all } h
+$$
+$
+$$
+$$
