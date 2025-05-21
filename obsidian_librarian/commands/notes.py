@@ -6,11 +6,13 @@ import base64
 import requests
 from ..config import get_config
 from openai import OpenAI
-from ..utils.post_process_formatting import post_process_ocr_output
+from ..utils.post_process_formatting import post_process_ocr_output, clean_raw_llm_output
 import pyperclip
 import time
+from datetime import datetime
 from ..utils.ai import generate_note_content
 from ..utils.file_operations import sanitize_filename
+from ..commands.utilities.format_fixer import FormatFixer
 
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
@@ -35,66 +37,33 @@ def process_image_with_gpt4v(image_path, note_name):
 
     # Load the OCR prompt from the prompt file
     prompt_path = Path(__file__).parent.parent / "prompts" / "ocr_prompt.txt"
-    try:
-        with open(prompt_path, 'r') as f:
-            prompt_template = f.read()
-        # Format the prompt with the note name
-        ocr_prompt = prompt_template.format(note_name=note_name)
-    except Exception as e:
-        # Fallback to basic prompt if file can't be read
-        ocr_prompt = f"Please write detailed notes about {note_name}. Transcribe the content from the image faithfully, and then organize that information in an appropriate way. Format the response in markdown."
-    
-    # Use the most capable available model
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",  # Current best model for vision tasks
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": ocr_prompt
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                                "detail": "high"
-                            }
+    with open(prompt_path, 'r') as f:
+        prompt_template = f.read()
+    ocr_prompt = prompt_template.format(note_name=note_name)
+
+    response = client.chat.completions.create(
+        model="gpt-4o",  # Current best model for vision tasks
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": ocr_prompt
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}",
+                            "detail": "high"
                         }
-                    ]
-                }
-            ],
-            max_tokens=8192,
-            temperature=0.5
-        )
-    except Exception as e:
-        # If gpt-4o fails, try to fall back to vision-preview
-        click.echo(f"gpt-4o failed with {e}, trying gpt-4-vision-preview...") # Optional: inform user of fallback
-        response = client.chat.completions.create(
-            model="gpt-4-vision-preview",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": ocr_prompt
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                                "detail": "high"
-                            }
-                        }
-                    ]
-                }
-            ],
-            max_tokens=8192,
-            temperature=0.5
-        )
+                    }
+                ]
+            }
+        ],
+        max_tokens=16000,
+        temperature=0.5
+    )
 
     # If the API call was successful, response will contain the data.
     # Exceptions are raised for API errors by the openai library itself.
@@ -324,20 +293,22 @@ def ocr(note_name, fix_math=True):
             
         click.echo(f"Processing image: {image_path.relative_to(vault_path)}")
         try:
-            # Get OCR result and apply post-processing
+            # Get OCR result
             ocr_result = process_image_with_gpt4v(str(image_path), note_name)
             if not ocr_result:
                 click.echo(f"  -> No text found in image.")
                 continue
 
-            ocr_content = post_process_ocr_output(ocr_result)
+            # Apply cleaning steps sequentially
+            cleaned_ocr_result = clean_raw_llm_output(ocr_result)
+            ocr_content_intermediate = post_process_ocr_output(cleaned_ocr_result)
             
+            ocr_content = ocr_content_intermediate # Initialize ocr_content
+
             # Apply additional math formatting fixes if requested
             if fix_math:
-                # Import here is correct as it avoids circular dependency issues
-                # and is only needed for this specific command path.
-                from ..commands.format import fix_math_formatting
-                ocr_content = fix_math_formatting(ocr_content)
+                fixer = FormatFixer(verbose=False) # Instantiate FormatFixer
+                ocr_content = fixer.apply_math_fixes(ocr_content_intermediate)
 
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             

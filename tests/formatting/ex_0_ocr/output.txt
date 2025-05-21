@@ -1,0 +1,49 @@
+(base) jinyoungkim@DN0a249806 ~ % olib notes ocr "Weak Perfect Bayes Equilibrium"
+INFO     numexpr.utils:utils.py:147 Note: NumExpr detected 11 cores but "NUMEXPR_MAX_THREADS" not set, so enforcing safe limit of 8.
+INFO     numexpr.utils:utils.py:159 NumExpr defaulting to 8 threads.
+INFO     obsidian_librarian.cli:cli.py:133 Auto-update interval elapsed, running incremental scan...
+INFO     obsidian_librarian.vault_state:vault_state.py:448 Performing incremental scan for files modified since 2025-05-21 14:04:42...
+INFO     obsidian_librarian.vault_state:vault_state.py:527 Incremental scan complete. Changes: 1 modified.
+INFO     obsidian_librarian.cli:cli.py:137 Incremental vault scan complete (Added: 0, Modified: 1, Deleted: 0).
+INFO     obsidian_librarian.cli:cli.py:160 Minor changes detected, skipping automatic embedding rebuild check.
+Processing image: Screenshot 2025-05-21 at 9.55.32 am.png
+Error processing image Screenshot 2025-05-21 at 9.55.32 am.png: bad escape \m at position 644 (line 15, column 79)
+Processing image: Screenshot 2025-05-21 at 9.55.38 am.png
+  -> Added OCR text.
+Processing image: Screenshot 2025-05-21 at 9.55.46 am.png
+  -> Added OCR text.
+Processing image: Screenshot 2025-05-21 at 9.55.52 am.png
+Error processing image Screenshot 2025-05-21 at 9.55.52 am.png: bad escape \s at position 178 (line 8, column 77)
+Processing image: Screenshot 2025-05-21 at 9.56.00 am.png
+Error processing image Screenshot 2025-05-21 at 9.56.00 am.png: bad escape \s at position 215 (line 8, column 104)
+Processing image: Screenshot 2025-05-21 at 9.56.07 am.png
+Error processing image Screenshot 2025-05-21 at 9.56.07 am.png: bad escape \m at position 556 (line 14, column 31)
+Processing image: Screenshot 2025-05-21 at 9.56.15 am.png
+  -> Added OCR text.
+Processing image: Screenshot 2025-05-21 at 9.56.22 am.png
+Error processing image Screenshot 2025-05-21 at 9.56.22 am.png: bad escape \T at position 1051 (line 29, column 19)
+Processing image: Screenshot 2025-05-21 at 9.56.46 am.png
+Error processing image Screenshot 2025-05-21 at 9.56.46 am.png: bad escape \s at position 174 (line 14, column 11)
+Processing image: Screenshot 2025-05-21 at 9.56.55 am.png
+Error processing image Screenshot 2025-05-21 at 9.56.55 am.png: bad escape \p at position 177 (line 13, column 7)
+Processing image: Screenshot 2025-05-21 at 9.57.04 am.png
+Error processing image Screenshot 2025-05-21 at 9.57.04 am.png: bad escape \s at position 528 (line 18, column 77)
+Processing image: Screenshot 2025-05-21 at 9.57.10 am.png
+Error processing image Screenshot 2025-05-21 at 9.57.10 am.png: bad escape \m at position 770 (line 27, column 1)
+Processing image: Screenshot 2025-05-21 at 9.57.21 am.png
+Error processing image Screenshot 2025-05-21 at 9.57.21 am.png: bad escape \l at position 210 (line 18, column 30)
+Processing image: Screenshot 2025-05-21 at 9.57.29 am.png
+Error processing image Screenshot 2025-05-21 at 9.57.29 am.png: bad escape \i at position 2354 (line 34, column 59)
+Processing image: Screenshot 2025-05-21 at 9.57.37 am.png
+Error processing image Screenshot 2025-05-21 at 9.57.37 am.png: bad escape \i at position 212 (line 8, column 85)
+Processing image: Screenshot 2025-05-21 at 9.57.44 am.png
+Error processing image Screenshot 2025-05-21 at 9.57.44 am.png: bad escape \s at position 231 (line 12, column 20)
+Processing image: Screenshot 2025-05-21 at 9.57.55 am.png
+Error processing image Screenshot 2025-05-21 at 9.57.55 am.png: missing < at position 240 (line 8, column 139)
+Processing image: Screenshot 2025-05-21 at 9.58.02 am.png
+Error processing image Screenshot 2025-05-21 at 9.58.02 am.png: bad escape \q at position 778 (line 35, column 49)
+Processing image: Screenshot 2025-05-21 at 9.58.09 am.png
+  -> Added OCR text.
+
+OCR results added for 4 image(s) in: Weak Perfect Bayes Equilibrium.md
+(base) jinyoungkim@DN0a249806 ~ % 

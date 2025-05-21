@@ -255,31 +255,58 @@ class FormatFixer:
         return corrected_text
 
     def _convert_latex_delimiters(self, text: str) -> str:
-        """Converts \(...\) to $...$ and \[...\] to $$...$$."""
-        text = text.replace(r'\(', '$')
-        text = text.replace(r'\)', '$')
-        text = text.replace(r'\[', '$$')
-        text = text.replace(r'\]', '$$')
+        """Converts LaTeX style delimiters to Markdown style.
+        \(...\) to $...$
+        \[...\] to $$...$$
+        Ensures correct pairing and handles content spanning multiple lines.
+        """
+        # Convert display math \[ ... \] to $$ ... $$
+        # Non-greedy match .*? for content, re.DOTALL for multiline content
+        text = re.sub(r'\\\[(.*?)\\\]', r'$$\1$$', text, flags=re.DOTALL)
+        
+        # Convert inline math \( ... \) to $ ... $
+        # Non-greedy match .*? for content, re.DOTALL for multiline content (though less common for inline)
+        text = re.sub(r'\\\((.*?)\\\)', r'$\1$', text, flags=re.DOTALL)
+        
         return text
 
     def _fix_math_content(self, text: str) -> str:
-        """Cleans up common issues within $...$ and $$...$$ blocks."""
-        def replace_content(match):
-            delimiter = match.group(1)
-            content = match.group(2)
+        """Cleans up common issues within $...$ and $$...$$ math blocks."""
+        # Correct \operatorname {abc} to \operatorname{abc}
+        text = re.sub(r'(\\operatorname)\s+({.*?})', r'\1\2', text)
+        
+        # Correct common cases of \command {arg} to \command{arg}
+        # This targets a command (letters) followed by space(s) and then an opening brace/paren/bracket
+        text = re.sub(r'(\\[a-zA-Z]+)\s+({)', r'\1\2', text)  # e.g., \textbf {word} -> \textbf{word}
+        text = re.sub(r'(\\[a-zA-Z]+)\s+(\()', r'\1\2', text) # e.g., \sqrt (x) -> \sqrt(x) (though \sqrt{x} is more common)
+        text = re.sub(r'(\\[a-zA-Z]+)\s+(\[)', r'\1\2', text) # e.g., \mathbb [R] -> \mathbb[R] (though \mathbb{R} is more common)
 
-            # Replace escaped underscore with literal underscore
-            fixed_content = content.replace(r'\_', '_')
+        # If LLM produces `\ {`, it's often meant to be `\{`.
+        text = re.sub(r'\\ ({)', r'\\{\1', text) # \ { -> \{
+        # Similarly for other brackets if this pattern is observed:
+        text = re.sub(r'\\ (\[)', r'\\[\1', text) # \ [ -> \[
+        text = re.sub(r'\\ (\()', r'\\(\1', text) # \ ( -> \(
 
-            # Fix wiki links inside math blocks (only for $$ blocks)
-            if delimiter == '$$' and '[[' in fixed_content and ']]' in fixed_content:
-                fixed_content = re.sub(r'\[\[([^\]]+)\]\]', r'\1', fixed_content)
+        # Fix escaped underscores in LaTeX (e.g., A\_1 -> A_1)
+        # This pattern looks for escaped underscores inside math blocks
+        text = re.sub(r'(\$[^\$]*?)\\_(.*?\$)', r'\1_\2', text)  # for inline math
+        text = re.sub(r'(\$\$[^\$]*?)\\_(.*?\$\$)', r'\1_\2', text, flags=re.DOTALL)  # for block math
+        
+        # Handle multiple underscores in the same math block
+        while re.search(r'(\$[^\$]*?)\\_(.*?\$)', text) or re.search(r'(\$\$[^\$]*?)\\_(.*?\$\$)', text, flags=re.DOTALL):
+            text = re.sub(r'(\$[^\$]*?)\\_(.*?\$)', r'\1_\2', text)  # for inline math
+            text = re.sub(r'(\$\$[^\$]*?)\\_(.*?\$\$)', r'\1_\2', text, flags=re.DOTALL)  # for block math
 
-            return delimiter + fixed_content + delimiter
+        # Fix \text{} formatting - remove space after command
+        text = re.sub(r'(\\text)\s+({)', r'\1\2', text)
 
-        pattern = r'(\${1,2})(.*?)\1'
-        corrected_text = re.sub(pattern, replace_content, text, flags=re.DOTALL)
-        return corrected_text
+        # Correct common mis-escaped delimiters if not caught by earlier specific delimiter fixes
+        # e.g. \$ text \$ -> $ text $ (if \$ wasn't meant to be literal)
+        # This is risky if user actually wants literal \$ inside math.
+        # The _fix_escaped_latex_delimiters should handle most of these at a higher level.
+        # text = re.sub(r'\\\$([^$]*?)\\\$', r'$\1$', text) # Already handled better elsewhere
+
+        return text
 
     def _fix_inline_math_spacing(self, text: str) -> str:
         """Fixes spacing issues around inline $...$ math."""
@@ -322,18 +349,27 @@ class FormatFixer:
         return re.sub(r'__SIMPLE_LINK_\d+__', r'1', text)
 
     def _format_math_blocks(self, text: str) -> str:
-        """Ensures $$ math blocks are on their own lines with blank lines around."""
-        # --- Refined Regex for Math Blocks ---
-        # Ensure $$ starts on a new line, preceded by exactly one blank line
-        # Use positive lookbehind (?<=...) to ensure a newline precedes, negative (?<!\n) to ensure no second newline
-        text = re.sub(r'(?<!\n)\n(?!\n)(\$\$)', r'\n\n\1', text) # Add leading blank line if only one newline exists
-        text = re.sub(r'(?<!\n)(\$\$)', r'\n\n\1', text)      # Add leading blank line if no newline exists
+        """Formats $$ math blocks to fit the desired style (compact formatting)."""
+        # First, ensure all $$ blocks are properly placed
+        
+        # Pattern 1: Ensure that math blocks start at the beginning of a line
+        # If a $$ is not at the start of a line, add a newline before it
+        text = re.sub(r'([^\n])\$\$', r'\1\n$$', text)
+        
+        # Pattern 2: Ensure that math blocks end with a newline
+        # If a $$ is not followed by a newline, add one
+        text = re.sub(r'\$\$([^\n])', r'$$\n\1', text)
 
-        # Ensure $$ ends a line, followed by exactly one blank line
-        # Use positive lookahead (?=...) to ensure a newline follows, negative (?!\n) to ensure no second newline
-        text = re.sub(r'(\$\$)\n(?!\n)', r'\1\n\n', text) # Add trailing blank line if only one newline exists
-        text = re.sub(r'(\$\$)(?!\n)', r'\1\n\n', text)   # Add trailing blank line if no newline exists
-        # --- End Refined Regex ---
+        # Pattern 3: Compact consecutive equations
+        # Looking for a pattern like "something$$\nequation\n$$next line" 
+        # and turning it into "something$$equation$$next line"
+        text = re.sub(r'([^\n])\$\$\s*\n(.*?)\n\s*\$\$\s*\n', r'\1$$\2$$\n', text, flags=re.DOTALL)
+        
+        # Pattern 4: For equations that remain on their own lines,
+        # remove any excess blank lines around them (ideal format doesn't have these)
+        text = re.sub(r'\n\n\$\$', r'\n$$', text)  # Remove extra line before $$
+        text = re.sub(r'\$\$\n\n', r'$$\n', text)   # Remove extra line after $$
+        
         return text
 
     def _format_code_blocks(self, text: str) -> str:
@@ -348,6 +384,52 @@ class FormatFixer:
         text = re.sub(r'(```)(?!\n)', r'\1\n\n', text)   # Add trailing blank line if no newline exists
         # --- End Refined Regex ---
         return text
+
+    def apply_math_fixes(self, text: str) -> str:
+        """
+        Applies a sequence of math-specific formatting fixes to the input text.
+        Preserves code blocks during the process.
+        """
+        original_text = text
+
+        # --- Preserve code blocks (Robust Strategy) ---
+        code_blocks = {}
+        placeholder_template = "___CODE_BLOCK_PLACEHOLDER_{}___"
+        
+        # Sort matches by start position to process them in order
+        sorted_matches = sorted(list(re.finditer(r'```.*?```', text, re.DOTALL)), key=lambda m: m.start())
+
+        text_with_placeholders_parts = []
+        last_end = 0
+        for i, match in enumerate(sorted_matches):
+            placeholder = placeholder_template.format(i)
+            code_blocks[placeholder] = match.group(0)
+            
+            text_with_placeholders_parts.append(text[last_end:match.start()])
+            text_with_placeholders_parts.append(placeholder)
+            last_end = match.end()
+        text_with_placeholders_parts.append(text[last_end:])
+        processed_text = "".join(text_with_placeholders_parts)
+
+        # --- Apply math fixes to text with placeholders ---
+        processed_text = self._fix_escaped_latex_delimiters(processed_text)
+        processed_text = self._convert_latex_delimiters(processed_text)
+        processed_text = self._fix_math_content(processed_text)       # Cleans up common issues within $...$ and $$...$$
+        processed_text = self._fix_inline_math_spacing(processed_text) # Fixes spacing issues around inline $...$ math
+        processed_text = self._format_math_blocks(processed_text)     # Ensures $$ math blocks are on their own lines
+
+        # --- Restore code blocks ---
+        final_text = processed_text
+        for i in range(len(sorted_matches)): # Iterate in the order of placeholder creation
+            placeholder = placeholder_template.format(i)
+            if placeholder in code_blocks:
+                final_text = final_text.replace(placeholder, code_blocks[placeholder], 1)
+
+        if self.verbose and final_text != original_text:
+            # This message is part of FormatFixer's own verbosity
+            print("  Applied math formatting fixes.")
+
+        return final_text
 
 def format_command(path=None, dry_run=False, backup=True, verbose=False):
     """Command line entry point for the format fixer"""
