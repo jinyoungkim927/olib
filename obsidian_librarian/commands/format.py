@@ -1,3 +1,10 @@
+"""
+Format command for Obsidian notes.
+
+This module provides CLI commands for formatting notes with a focus on
+consistent styling and proper LaTeX math formatting.
+"""
+
 import click
 import os
 import re
@@ -11,11 +18,10 @@ import time
 
 from obsidian_librarian.config import get_vault_path_from_config
 from obsidian_librarian.utils.file_operations import find_note_in_vault, read_note_content, get_markdown_files
-from .. import vault_state # Assuming vault_state might be used for backup/undo
+from .. import vault_state
 
 logger = logging.getLogger(__name__)
 
-# Should be a group command with subcommands for formatting and screenshot conversion
 @click.group()
 def format_notes():
     """Format notes and convert screenshots to text
@@ -43,20 +49,20 @@ def fix(note_name=None, dry_run=False, verbose=False, no_backup=False):
     fixer = FormatFixer(dry_run=dry_run, backup=not no_backup, verbose=verbose)
 
     if note_name:
-        # Find the specific note (using a helper function is better)
-        note_path_obj = find_note_in_vault(vault_path, note_name) # Assuming find_note_in_vault returns Path or None
+        # Find the specific note
+        note_path_obj = find_note_in_vault(vault_path, note_name) 
 
         if note_path_obj and note_path_obj.is_file():
              click.echo(f"Formatting specific note: {note_path_obj.relative_to(vault_path)}")
              # Use the fixer's format_file method directly
-             was_modified = fixer.format_file(str(note_path_obj)) # Pass path as string
-             # Save history if changes were made (format_file doesn't save history itself)
+             was_modified = fixer.format_file(str(note_path_obj)) 
+             # Save history if changes were made
              if was_modified and not dry_run:
-                 fixer.save_history() # save_history now checks fixer.modified_files
+                 fixer.save_history() 
         else:
              click.echo(f"Error: Note '{note_name}' not found in vault.")
     else:
         # Process the entire vault
         click.echo(f"Formatting entire vault: {vault_path}")
-        # Use the fixer's format_directory or format_vault method
-        fixer.format_directory(vault_path) # This method handles finding files and saving history
+        # Use the fixer's format_directory method
+        fixer.format_directory(vault_path)

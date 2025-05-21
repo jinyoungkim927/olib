@@ -2,72 +2,16 @@ import click
 import os
 import re
 from pathlib import Path
-import base64
-import requests
-from ..config import get_config
-from openai import OpenAI
-from ..utils.post_process_formatting import post_process_ocr_output, clean_raw_llm_output
 import pyperclip
 import time
 from datetime import datetime
+from ..config import get_config
+from ..utils.post_process_formatting import clean_raw_llm_output
 from ..utils.ai import generate_note_content
 from ..utils.file_operations import sanitize_filename
 from ..commands.utilities.format_fixer import FormatFixer
-
-def encode_image(image_path):
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode('utf-8')
-
-def process_image_with_gpt4v(image_path, note_name):
-    """Process an image using GPT-4 Vision and return the text description."""
-    # Import openai only when processing an image
-    try:
-        # import requests # This import is not used for OpenAI client calls
-        from openai import OpenAI
-    except ImportError:
-        raise ImportError("Required libraries 'requests' and 'openai' not found. Install with 'pip install requests openai'")
-
-    config = get_config()
-    api_key = config.get('api_key')
-    if not api_key:
-        raise ValueError("OpenAI API key not found in config. Run 'olib config setup'.")
-
-    client = OpenAI(api_key=api_key)
-    base64_image = encode_image(image_path)
-
-    # Load the OCR prompt from the prompt file
-    prompt_path = Path(__file__).parent.parent / "prompts" / "ocr_prompt.txt"
-    with open(prompt_path, 'r') as f:
-        prompt_template = f.read()
-    ocr_prompt = prompt_template.format(note_name=note_name)
-
-    response = client.chat.completions.create(
-        model="gpt-4o",  # Current best model for vision tasks
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": ocr_prompt
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}",
-                            "detail": "high"
-                        }
-                    }
-                ]
-            }
-        ],
-        max_tokens=16000,
-        temperature=0.5
-    )
-
-    # If the API call was successful, response will contain the data.
-    # Exceptions are raised for API errors by the openai library itself.
-    return response.choices[0].message.content
+from ..commands.ocr import process_image_with_gpt4v, extract_image_paths_from_md
+from ..utils.post_process_formatting import post_process_ocr_output
 
 def get_all_note_titles(vault_path):
     """Get all note titles in the vault (without .md extension)"""
@@ -257,100 +201,15 @@ def autolink(note_name=None, verbose=False, dry_run=False):
 
 @notes.command()
 @click.argument('note_name', type=click.STRING)
-@click.option('--fix-math', '-m', is_flag=True, default=True, help='Fix math formatting issues in OCR output')
-def ocr(note_name, fix_math=True):
-    """Convert screenshots to text"""
-    config = get_config()
-    vault_path = config.get('vault_path')
+@click.option('--keep-timestamps', is_flag=True, help='Keep OCR processing timestamps in output')
+def ocr(note_name, keep_timestamps=False):
+    """Convert screenshots to text using OCR."""
+    # This is a thin wrapper around the main OCR command.
+    # Import the main OCR function at runtime to avoid circular imports
+    from ..commands.ocr import ocr_note as main_ocr
     
-    if not vault_path:
-        click.echo("Error: Vault path not configured")
-        return
-
-    note_path = Path(vault_path) / f"{note_name}.md"
-    if not note_path.exists():
-        click.echo(f"Error: Note {note_name} not found")
-        return
-    
-    # Read the note content and find image references
-    with open(note_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-    # Find all image references in the ![[image]] format
-    image_refs = re.findall(r'!\[\[(.*?)\]\]', content)
-    
-    if not image_refs:
-        click.echo("No image references found in this note")
-        return
-
-    modified_content = content
-    images_processed = 0
-    for image_ref in image_refs:
-        image_path = Path(vault_path) / image_ref
-        if not image_path.exists():
-            click.echo(f"Warning: Image not found: {image_ref}")
-            continue
-            
-        click.echo(f"Processing image: {image_path.relative_to(vault_path)}")
-        try:
-            # Get OCR result
-            ocr_result = process_image_with_gpt4v(str(image_path), note_name)
-            if not ocr_result:
-                click.echo(f"  -> No text found in image.")
-                continue
-
-            # Apply cleaning steps sequentially
-            cleaned_ocr_result = clean_raw_llm_output(ocr_result)
-            ocr_content_intermediate = post_process_ocr_output(cleaned_ocr_result)
-            
-            ocr_content = ocr_content_intermediate # Initialize ocr_content
-
-            # Apply additional math formatting fixes if requested
-            if fix_math:
-                fixer = FormatFixer(verbose=False) # Instantiate FormatFixer
-                ocr_content = fixer.apply_math_fixes(ocr_content_intermediate)
-
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Find the image reference in the content and add OCR result right after it
-            # Escape special regex characters in the image reference
-            escaped_image_ref = re.escape(image_ref)
-            # Pattern to find the specific image link, avoiding partial matches
-            image_pattern = re.compile(r'(!\[\[' + escaped_image_ref + r'\]\])')
-
-            # Check if OCR block already exists to avoid duplicates
-            ocr_marker = f"\n---\nOCR processing: "
-            existing_ocr_pattern = re.compile(r'(!\[\[' + escaped_image_ref + r'\]\])(' + re.escape(ocr_marker) + r'.*?\n)', re.DOTALL)
-
-            if existing_ocr_pattern.search(modified_content):
-                click.echo(f"  -> OCR block already exists for {image_ref}. Skipping.")
-                continue
-
-            # Add the new OCR block
-            ocr_block = f"{ocr_marker}{timestamp}\n\n{ocr_content}\n"
-            # Use sub with a lambda to ensure we only replace the first match after the loop starts fresh
-            modified_content, num_replacements = image_pattern.subn(rf'\1{ocr_block}', modified_content, count=1)
-
-            if num_replacements > 0:
-                click.echo(f"  -> Added OCR text.")
-                images_processed += 1
-            else:
-                # This shouldn't happen if image_refs was populated correctly, but good to check
-                click.echo(f"  -> Warning: Could not find exact pattern ![[{image_ref}]] to insert OCR text.", err=True)
-
-        except (ImportError, ValueError, Exception) as e:
-            click.echo(f"Error processing image {image_ref}: {e}", err=True)
-
-    # Write the modified content back to the file only if changes were made
-    if images_processed > 0:
-        try:
-            with open(note_path, 'w', encoding='utf-8') as f:
-                f.write(modified_content)
-            click.echo(f"\nOCR results added for {images_processed} image(s) in: {note_path.relative_to(vault_path)}")
-        except Exception as e:
-            click.echo(f"\nError writing updated note file {note_path.name}: {e}", err=True)
-    else:
-        click.echo("\nNo new OCR results were added to the note.")
+    # Forward to the main implementation
+    main_ocr(note_name=note_name, keep_timestamps=keep_timestamps)
 
 def find_problematic_files(vault_path, min_size=10, max_size=50000, check_empty=True, 
                        check_duplicates=False, check_broken_links=False):
