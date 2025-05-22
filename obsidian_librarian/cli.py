@@ -1,10 +1,14 @@
 import click
 import os
-import sys # Import sys
-import platform # Import platform
-import shutil # Import shutil
-import time # Import time
+import sys
+import platform
+import shutil
+import time
 import logging
+import datetime
+from pathlib import Path
+from typing import Optional, Tuple
+
 from .commands import (
     format,
     check,
@@ -14,18 +18,10 @@ from .commands import (
     undo,
     config as config_cmd,
     index as index_cmd,
-    analytics as analytics_cmd # Import the analytics module
+    analytics as analytics_cmd
 )
-# Import config utility functions if needed elsewhere, but not the command itself
-# from .config import get_config # Example if needed
 
-# Import specific command functions/groups
-# from .commands.link import link_command # <-- Comment out this line
-# from .commands.analytics import run_analytics
-# Import the config command from its actual location
 from .commands.config import manage_config as config_command
-from pathlib import Path
-from typing import Optional, Tuple # Keep Optional for type hinting
 
 # Import vault state and config functions
 from . import vault_state
@@ -33,16 +29,11 @@ from .config import (
     get_vault_path_from_config, get_config, get_auto_update_settings,
     update_last_scan_timestamp, set_auto_update_setting, get_config_dir,
     get_last_embeddings_build_timestamp, update_last_embeddings_build_timestamp,
-    ensure_config_dir_exists # setup_config removed
+    ensure_config_dir_exists
 )
-from .vault_state import get_max_mtime_from_db, VaultStateManager # <-- Import
-# --- Remove the problematic import from utils.indexing ---
-# from .utils.indexing import DEFAULT_MODEL as DEFAULT_EMBEDDING_MODEL, build_embeddings_index # <-- REMOVE THIS LINE
-# --- Keep the import for the default model name if needed elsewhere, or remove if unused ---
-from .utils.indexing import DEFAULT_MODEL as DEFAULT_EMBEDDING_MODEL # <-- Keep only this part if DEFAULT_MODEL is needed
-# --- Import the build function from commands.index ---
+from .vault_state import get_max_mtime_from_db, VaultStateManager
+from .utils.indexing import DEFAULT_MODEL as DEFAULT_EMBEDDING_MODEL
 from .commands.index import _perform_index_build
-# --- End import ---
 
 # Define the threshold for triggering embedding updates
 MIN_CHANGES_FOR_EMBEDDING = 1 # e.g., 1 means any added or modified file triggers check
@@ -168,7 +159,7 @@ def cli(ctx, verbose, quiet):
              if not vault_path:
                  logger.debug("Auto-scan skipped: Vault path not configured.")
              elif not run_scan:
-                 logger.debug(f"Auto-scan skipped: Interval not elapsed (Last scan: {datetime.fromtimestamp(last_scan_time).strftime('%Y-%m-%d %H:%M:%S') if last_scan_time else 'Never'}, Interval: {auto_scan_interval/60} mins).")
+                 logger.debug(f"Auto-scan skipped: Interval not elapsed (Last scan: {datetime.datetime.fromtimestamp(last_scan_time).strftime('%Y-%m-%d %H:%M:%S') if last_scan_time else 'Never'}, Interval: {auto_scan_interval/60} mins).")
         # --- End Indentation for Auto-scan block ---
     # --- End Auto-scan ---
 
@@ -183,7 +174,6 @@ cli.add_command(undo.undo)
 cli.add_command(config_cmd.manage_config, name="config")
 cli.add_command(index_cmd.index, name="index")
 cli.add_command(analytics_cmd.analytics, name="analytics")
-# main.add_command(update_index_command) # Remove old standalone update-index if it exists
 
 # --- Entry Point ---
 def main():

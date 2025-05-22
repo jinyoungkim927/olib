@@ -3,11 +3,9 @@ Simple post-processing utilities for OCR and LLM outputs.
 """
 
 import re
-from obsidian_librarian.utils.latex_formatting import (
-    protect_code_blocks,
-    fix_latex_delimiters,
-    fix_math_content,
-    format_inline_math_spacing
+from obsidian_librarian.utils.math_processing import (
+    process_math_blocks,
+    protect_code_blocks
 )
 
 def clean_llm_output(text: str) -> str:
@@ -22,22 +20,8 @@ def clean_llm_output(text: str) -> str:
     text = re.sub(r'^```markdown\n|```\n?$', '', text.strip())
     text = re.sub(r'---\s*\nOCR processing: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*\n+', '', text)
     
-    # Fix LaTeX delimiters
-    text = fix_latex_delimiters(text)
-    
-    # Fix common command errors
-    text = re.sub(r'(^|\s)ext{', r'\1\\text{', text)
-    
-    # Fix missing math delimiters
-    text = re.sub(r'\$([^$\n]{3,}|[^$\n]*?[+\-*/=<>\^_][^$\n]*)(?!\$)(?=\s|$)', r'$\1$', text)
-    
-    # Process math content
-    # Use a simpler approach - apply fixes to obvious math blocks
-    text = re.sub(r'\$([^\$]+)\$', lambda m: '$' + fix_math_content(m.group(1)) + '$', text)
-    text = re.sub(r'\$\$(.*?)\$\$', lambda m: '$$' + fix_math_content(m.group(1), True) + '$$', text, flags=re.DOTALL)
-    
-    # Fix spacing around inline math
-    text = format_inline_math_spacing(text)
+    # Process all math using the unified function
+    text = process_math_blocks(text)
     
     # Standardize bullet points
     text = re.sub(r'\s*[-\*•]\s+', '- ', text)
@@ -71,4 +55,5 @@ def format_latex(text: str) -> str:
 
 def convert_latex_delimiters(text: str) -> str:
     """Legacy function for backward compatibility."""
+    from obsidian_librarian.utils.math_processing import fix_latex_delimiters
     return fix_latex_delimiters(text)

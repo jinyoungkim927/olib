@@ -13,15 +13,10 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 
 from obsidian_librarian.config import get_config
-from obsidian_librarian.utils.latex_formatting import (
+from obsidian_librarian.utils.math_processing import (
     protect_code_blocks,
-    protect_and_extract_math,
-    fix_math_content,
-    fix_latex_delimiters,
-    format_inline_math_spacing,
-    format_display_math_blocks
+    process_math_blocks
 )
-from obsidian_librarian.utils.compact_math import compact_math_blocks
 
 
 class FormatFixer:
@@ -184,82 +179,34 @@ class FormatFixer:
     
     def apply_all_fixes(self, text: str, filename_base: Optional[str] = None) -> str:
         """Apply formatting fixes to the text."""
-        # 1. Protect code blocks
+        # 1. Protect code blocks for non-math fixes
         text, code_blocks = protect_code_blocks(text)
         
-        # 2. Fix common issues with math delimiters
-        text = fix_latex_delimiters(text)
-        
-        # 3. Extract math blocks for protection
-        text, display_math, inline_math = protect_and_extract_math(text)
-        
-        # 4. Fix wiki link issues
+        # 2. Fix wiki link issues
         text = self._fix_wiki_links(text)
         
-        # 5. Fix hashtags with brackets
+        # 3. Fix hashtags with brackets
         text = self._fix_hashtag_brackets(text)
         
-        # 6. Remove simple link placeholders
+        # 4. Remove simple link placeholders
         text = self._remove_simple_link_placeholders(text)
         
-        # 7. Process math content
-        for placeholder, math_block in inline_math.items():
-            content = math_block.strip('$')
-            fixed_content = fix_math_content(content)
-            text = text.replace(placeholder, f"${fixed_content}$")
-            
-        for placeholder, math_block in display_math.items():
-            content = math_block.strip('$')
-            fixed_content = fix_math_content(content, is_display_math=True)
-            text = text.replace(placeholder, f"$${fixed_content}$$")
-        
-        # 8. Fix spacing around inline math
-        text = format_inline_math_spacing(text)
-        
-        # 9. Format display math blocks
-        text = format_display_math_blocks(text)
-        
-        # 10. Restore code blocks
+        # 5. Restore code blocks for math processing
         for placeholder, original in code_blocks.items():
             text = text.replace(placeholder, original)
         
-        # 11. Apply compact math formatting for better LaTeX spacing
-        text = compact_math_blocks(text)
+        # 6. Process all math in one step using the consolidated module
+        text = process_math_blocks(text)
         
-        # 12. Clean up excessive newlines
+        # 7. Clean up excessive newlines
         text = re.sub(r'\n{3,}', '\n\n', text).strip()
         
         return text
     
     def apply_math_fixes(self, text: str) -> str:
         """Apply only math-related formatting fixes."""
-        # Simplified version that just handles math fixes
-        text, code_blocks = protect_code_blocks(text)
-        text = fix_latex_delimiters(text)
-        text, display_math, inline_math = protect_and_extract_math(text)
-        
-        # Process math content
-        for placeholder, math_block in inline_math.items():
-            content = math_block.strip('$')
-            fixed_content = fix_math_content(content)
-            text = text.replace(placeholder, f"${fixed_content}$")
-            
-        for placeholder, math_block in display_math.items():
-            content = math_block.strip('$')
-            fixed_content = fix_math_content(content, is_display_math=True)
-            text = text.replace(placeholder, f"$${fixed_content}$$")
-        
-        # Fix spacing around inline math
-        text = format_inline_math_spacing(text)
-        
-        # Apply compact math formatting
-        text = compact_math_blocks(text)
-        
-        # Restore code blocks
-        for placeholder, original in code_blocks.items():
-            text = text.replace(placeholder, original)
-        
-        return text
+        # Simplified version that just handles math fixes using the consolidated module
+        return process_math_blocks(text)
     
     # --- Helper Methods ---
     
@@ -361,35 +308,6 @@ class FormatFixer:
                         print("  ...")
                         break
     
-    def _fix_malformed_math_delimiters(self, text: str) -> str:
-        """Fix common issues with malformed math delimiters"""
-        # Fix triple dollars
-        text = text.replace('$$$', '$$')
-        
-        # Fix mixed single/double dollars
-        text = re.sub(r'\$\$([^$]+)\$(?!\$)', r'$$\1$$', text)
-        text = re.sub(r'\$([^$]+)\$\$(?!\$)', r'$$\1$$', text)
-        
-        return text
-    
-    def _remove_duplicate_title(self, text: str, filename_base: str) -> str:
-        """Remove the first H1 header if it matches the filename"""
-        pattern = re.compile(r"^\s*#\s+" + re.escape(filename_base) + r"\s*\n")
-        if pattern.match(text):
-            first_line_end = text.find('\n')
-            if first_line_end != -1:
-                if text[first_line_end+1:].startswith('\n'):
-                    return text[first_line_end+2:] # Skip title and blank line
-                else:
-                    return text[first_line_end+1:] # Skip just title line
-            else:
-                return "" # File only contained the title
-        return text
-    
-    def _fix_bullet_indentation(self, text: str) -> str:
-        """Convert space-indented bullets to tab-indented"""
-        return re.sub(r'^(  )\* ', r'\t* ', text, flags=re.MULTILINE)
-    
     def _fix_hashtag_brackets(self, text: str) -> str:
         """Fix hashtags like #[[tag]], #[tag], #tag-[[subtag]]"""
         # Handle #[[tag]] or #[tag] -> #tag
@@ -412,18 +330,6 @@ class FormatFixer:
     def _remove_simple_link_placeholders(self, text: str) -> str:
         """Remove __SIMPLE_LINK_<digits>__ placeholders"""
         return re.sub(r'__SIMPLE_LINK_\d+__', r'1', text)
-    
-    def _format_code_blocks(self, text: str) -> str:
-        """Ensure code blocks are properly formatted"""
-        # Ensure ``` starts on a new line with a blank line before
-        text = re.sub(r'(?<!\n)\n(?!\n)(```)', r'\n\n\1', text)
-        text = re.sub(r'(?<!\n)(```)', r'\n\n\1', text)
-        
-        # Ensure ``` ends with a newline and a blank line after
-        text = re.sub(r'(```)\n(?!\n)', r'\1\n\n', text)
-        text = re.sub(r'(```)(?!\n)', r'\1\n\n', text)
-        
-        return text
 
 
 def format_command(path=None, dry_run=False, backup=True, verbose=False):
